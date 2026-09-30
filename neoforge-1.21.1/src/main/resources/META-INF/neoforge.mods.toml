@@ -1,0 +1,24 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="All Rights Reserved"
+
+[[mods]]
+modId="shapeexcavator"
+version="${version}"
+displayName="Shape Excavator"
+authors="byFLX"
+description='''A hand tool whose excavation shape is configured in game, with numeric fields and a rotatable 3D block preview.'''
+
+[[dependencies.shapeexcavator]]
+modId="neoforge"
+type="required"
+versionRange="[21.1.219,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.shapeexcavator]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1,1.22)"
+ordering="NONE"
+side="BOTH"

@@ -1,0 +1,58 @@
+# gradle
+
+.gradle/
+build/
+out/
+classes/
+
+# eclipse
+
+*.launch
+
+# idea
+
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# vscode
+
+.settings/
+.vscode/
+bin/
+.classpath
+.project
+
+# macos
+
+*.DS_Store
+
+# development game directories
+
+run/
+run-client-*/
+run-server/
+
+# java
+
+hs_err_*.log
+replay_*.log
+*.hprof
+*.jfr
+
+# agent review transcripts
+
+# The verdict, review mode, shell probe, trust level and timings all live in the committed
+# REVIEW-*.md header. The transcript is the raw reviewer stream - tens of KB each, largely the
+# echoed prompt. It is written to the MAIN checkout so it survives worktree removal, but it is
+# local diagnostic detail, not repository history.
+.agents/reviews/*.transcript.log
+
+# per-review shell-probe token, created and deleted by review.ps1
+.agents/.review-nonce-*
+
+# run directories
+run/
+run-client-*/
+run-server/
