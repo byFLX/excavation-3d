@@ -30,12 +30,15 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.level.BlockDropsEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -45,13 +48,16 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  *
  * <ul>
  *   <li>The start block's {@link BlockEvent.BreakEvent} (lowest priority, only if nobody cancelled
- *       it so far) records an unconfirmed attempt with the orientation frozen at that moment. A
- *       listener running after this one may still cancel the break, so in survival the attempt is
- *       only confirmed from the tool's {@code mineBlock} hook, which the player's own
- *       {@code destroyBlock} calls after the event was not cancelled. The operation starts at the
- *       end of the tick only if the attempt was confirmed, the kept event is still not cancelled
- *       and the start block was really removed; see {@link StartGate}. Another player's break of
- *       the same block never starts it.</li>
+ *       it so far) records an unconfirmed attempt with the orientation frozen at that moment; the
+ *       hit face is checked on the server ({@link HitFaces}). A later listener may still cancel the
+ *       break and the block may still refuse its removal, so the attempt is only confirmed by the
+ *       {@link BlockDropsEvent} of this player's own break, which the player's survival
+ *       {@code destroyBlock} fires only after the block was removed. The operation starts at the
+ *       end of the tick only if the attempt was confirmed and the start block is still gone; see
+ *       {@link StartGate}. Another player's break of the same block never starts it. Creative
+ *       breaks have no such signal and therefore always mine a single block.</li>
+ *   <li>The single-block key blocks the attempt, also when its update arrives after the break
+ *       within the same tick.</li>
  *   <li>Extra blocks go through the player's own {@code ServerPlayerGameMode.destroyBlock}, which
  *       fires the break event for protection mods and handles loot, experience and tool wear once
  *       per block. Breaks caused by the operation never start another operation.</li>
@@ -71,9 +77,8 @@ public final class ExcavationService {
     private record ClickedFace(BlockPos pos, Direction face) {
     }
 
-    /** {@code event} is kept so the end of the tick sees whether any later listener cancelled it. */
     private record Pending(ServerLevel level, BlockPos pos, BlockState state, List<Offset> offsets,
-            float startProgress, int slot, UUID toolId, BlockEvent.BreakEvent event) {
+            float startProgress, int slot, UUID toolId) {
     }
 
     private static final class Operation {
@@ -112,7 +117,6 @@ public final class ExcavationService {
         }
     }
 
-    private static final Map<UUID, Boolean> BYPASS = new HashMap<>();
     private static final Map<UUID, ClickedFace> LAST_FACE = new HashMap<>();
     private static final StartGate<Pending> STARTS = new StartGate<>();
     private static final Map<UUID, Operation> OPERATIONS = new LinkedHashMap<>();
@@ -123,11 +127,7 @@ public final class ExcavationService {
     }
 
     public static void setBypass(ServerPlayer player, boolean active) {
-        if (active) {
-            BYPASS.put(player.getUUID(), true);
-        } else {
-            BYPASS.remove(player.getUUID());
-        }
+        STARTS.setBypass(player.getUUID(), active);
     }
 
     public static void onLeftClickBlock(PlayerInteractEvent.LeftClickBlock event) {
@@ -141,7 +141,7 @@ public final class ExcavationService {
             return;
         }
         UUID id = player.getUUID();
-        if (BREAKING_EXTRA.contains(id) || BYPASS.containsKey(id)) {
+        if (BREAKING_EXTRA.contains(id) || STARTS.bypassActive(id)) {
             return;
         }
         ItemStack tool = player.getMainHandItem();
@@ -158,6 +158,12 @@ public final class ExcavationService {
             // Storage and machines never start an area.
             return;
         }
+        if (player.isCreative()) {
+            // Creative destroyBlock ignores whether the block refused its removal and fires nothing
+            // afterwards, so a successful start cannot be proven (plan §10): single block only.
+            player.displayClientMessage(Component.translatable("message.shapeexcavator.creative_single_block"), true);
+            return;
+        }
         if (OPERATIONS.containsKey(id)) {
             player.displayClientMessage(Component.translatable("message.shapeexcavator.busy"), true);
             return;
@@ -171,31 +177,22 @@ public final class ExcavationService {
             return;
         }
         BlockPos pos = event.getPos().immutable();
-        Orientation orientation = Orientation.orient(hitFace(player, level, pos), player.getDirection(),
+        Orientation orientation = Orientation.orient(hitFace(player, level, pos, state), player.getDirection(),
                 Orientation.Mode.forType(config.type()));
         STARTS.attempt(id, pos, new Pending(level, pos, state, valid.shape().worldOffsets(orientation),
-                state.getDestroyProgress(player, level, pos), player.getInventory().selected, data.toolId(), event));
-        if (player.isCreative()) {
-            // Creative destroyBlock never calls mineBlock. After the event only the removal itself is
-            // left, so the final event state and the removal check in startPending decide.
-            STARTS.confirm(id, pos);
-        }
+                state.getDestroyProgress(player, level, pos), player.getInventory().selected, data.toolId()));
     }
 
     /**
-     * Called from {@link com.byflx.shapeexcavator.item.ShapeExcavatorItem#mineBlock} inside the
-     * player's own survival {@code destroyBlock}, i.e. only after the break event was not cancelled
-     * by any listener. The build restriction is checked here as well.
+     * The player's survival {@code destroyBlock} calls {@code playerDestroy}, which handles the
+     * drops, only if the block was really removed. So drops with this player as breaker at the
+     * attempted position prove that this player's own break of the start block succeeded. Received
+     * even if another mod cancelled the drops: the block is gone either way.
      */
-    public static void onStartBlockBreakPassed(ServerPlayer player, BlockPos pos) {
-        UUID id = player.getUUID();
-        if (BREAKING_EXTRA.contains(id) || !STARTS.has(id)) {
-            return;
+    public static void onBlockDrops(BlockDropsEvent event) {
+        if (event.getBreaker() instanceof ServerPlayer player && !BREAKING_EXTRA.contains(player.getUUID())) {
+            STARTS.confirmRemoved(player.getUUID(), event.getPos());
         }
-        if (player.blockActionRestricted(player.serverLevel(), pos, player.gameMode.getGameModeForPlayer())) {
-            return;
-        }
-        STARTS.confirm(id, pos);
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
@@ -219,8 +216,7 @@ public final class ExcavationService {
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         UUID id = event.getEntity().getUUID();
         OPERATIONS.remove(id);
-        STARTS.forget(id);
-        BYPASS.remove(id);
+        STARTS.removePlayer(id);
         LAST_FACE.remove(id);
     }
 
@@ -237,17 +233,14 @@ public final class ExcavationService {
     public static void onServerStopped(ServerStoppedEvent event) {
         OPERATIONS.clear();
         STARTS.clear();
-        BYPASS.clear();
         LAST_FACE.clear();
         BREAKING_EXTRA.clear();
     }
 
     private static void startPending(MinecraftServer server) {
-        // Unconfirmed attempts, events a later listener cancelled, and starts whose block was not
-        // removed (still there, property change, replacement) are dropped here, even if someone else
-        // removed the block in the meantime.
-        Map<UUID, Pending> started = STARTS.drain(
-                (pos, pending) -> !pending.event().isCanceled() && startBlockRemoved(pending));
+        // Unconfirmed attempts (cancelled event, refused removal, creative) are dropped here even if
+        // someone else removed the block in the meantime, as are starts whose block came back.
+        Map<UUID, Pending> started = STARTS.drain((pos, pending) -> startBlockRemoved(pending));
         for (Map.Entry<UUID, Pending> entry : started.entrySet()) {
             Pending pending = entry.getValue();
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
@@ -412,19 +405,19 @@ public final class ExcavationService {
         }
     }
 
-    private static Direction hitFace(ServerPlayer player, ServerLevel level, BlockPos pos) {
+    /** The face from the client's packet is only a candidate; {@link HitFaces} checks it. */
+    private static Direction hitFace(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state) {
         ClickedFace clicked = LAST_FACE.get(player.getUUID());
-        if (clicked != null && clicked.pos().equals(pos)) {
-            return clicked.face();
-        }
+        Direction claimed = clicked != null && clicked.pos().equals(pos) ? clicked.face() : null;
         Vec3 eye = player.getEyePosition();
         Vec3 end = eye.add(player.getViewVector(1.0F).scale(player.blockInteractionRange() + 1.0));
         BlockHitResult hit = level.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE,
                 player));
-        if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos)) {
-            return hit.getDirection();
-        }
-        Vec3 centre = Vec3.atCenterOf(pos);
-        return Direction.getNearest((float) (eye.x - centre.x), (float) (eye.y - centre.y), (float) (eye.z - centre.z));
+        Direction traced = hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(pos)
+                ? hit.getDirection() : null;
+        VoxelShape shape = state.getShape(level, pos);
+        AABB box = (shape.isEmpty() ? new AABB(0, 0, 0, 1, 1, 1) : shape.bounds())
+                .move(pos.getX(), pos.getY(), pos.getZ());
+        return HitFaces.choose(claimed, traced, box, eye);
     }
 }

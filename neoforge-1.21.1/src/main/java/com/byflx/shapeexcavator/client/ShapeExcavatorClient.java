@@ -10,6 +10,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.InputEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.settings.KeyConflictContext;
 import net.neoforged.neoforge.common.NeoForge;
@@ -30,6 +31,7 @@ public final class ShapeExcavatorClient {
     public ShapeExcavatorClient(IEventBus modBus) {
         modBus.addListener(ShapeExcavatorClient::registerKeys);
         NeoForge.EVENT_BUS.addListener(ShapeExcavatorClient::onClientTick);
+        NeoForge.EVENT_BUS.addListener(ShapeExcavatorClient::onInteractionKey);
         NeoForge.EVENT_BUS.addListener(ShapeExcavatorClient::onLoggingOut);
         NeoForge.EVENT_BUS.addListener(WorldPreview::onRenderLevel);
         NeoForge.EVENT_BUS.addListener(ToolHud::onRenderGui);
@@ -52,13 +54,28 @@ public final class ShapeExcavatorClient {
                 ClientAccess.openEditor();
             }
         }
+        syncBypass(minecraft);
+        WorldPreview.tick(minecraft);
+    }
+
+    /**
+     * Fired inside the client tick right before an attack sends its mining action. Syncing here puts
+     * a just-pressed or just-released single-block key on the wire ahead of the break, so the
+     * server sees the key state the player had when mining.
+     */
+    private static void onInteractionKey(InputEvent.InteractionKeyMappingTriggered event) {
+        if (event.isAttack()) {
+            syncBypass(Minecraft.getInstance());
+        }
+    }
+
+    private static void syncBypass(Minecraft minecraft) {
         boolean bypass = minecraft.player != null && minecraft.screen == null && isSingleBlockKeyDown(minecraft);
         ClientState.setBypassActive(bypass);
         if (bypass != sentBypass && minecraft.getConnection() != null) {
             sentBypass = bypass;
             PacketDistributor.sendToServer(new BypassPayload(bypass));
         }
-        WorldPreview.tick(minecraft);
     }
 
     /**

@@ -11,7 +11,7 @@ Standalone Minecraft 1.21.1 / NeoForge 21.1.x mod: a hand tool whose excavation 
 
 - Craft: iron ingot, redstone, iron ingot over two sticks (`data/shapeexcavator/recipe/shape_excavator.json`). Also in the Tools creative tab.
 - Right-click into the air, or press the editor key (default `V`), to open the editor. Apply sends the shape to the server; only its confirmation changes the tool.
-- Mining the targeted block with the tool excavates the shape. Hold the single-block key (default Shift) to mine one block only.
+- Mining the targeted block with the tool excavates the shape in survival mode, once the tool has really mined and harvested that start block. In creative mode the tool mines single blocks. Hold the single-block key (default Shift) to mine one block only.
 - Server limits and work budgets: `serverconfig/shapeexcavator-server.toml` in the world folder. Personal presets: `config/shapeexcavator-presets.json`.
 
 ## Code layout (`com.byflx.shapeexcavator`)

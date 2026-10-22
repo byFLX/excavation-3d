@@ -1,8 +1,10 @@
 package com.byflx.shapeexcavator.excavation;
 
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiPredicate;
 import net.minecraft.core.BlockPos;
@@ -13,13 +15,18 @@ import net.minecraft.core.BlockPos;
  *
  * <ol>
  *   <li>{@link #attempt}: the player's {@code BreakEvent} for the start block. Any later listener
- *       may still cancel it, so this alone never starts anything.</li>
- *   <li>{@link #confirm}: called from inside the same player's own {@code destroyBlock}, after the
- *       event was not cancelled and every later gate of the break path passed. Another player's
- *       break of the same block never confirms this player's attempt.</li>
+ *       may still cancel it and the block may still refuse its removal, so this alone never starts
+ *       anything.</li>
+ *   <li>{@link #confirmRemoved}: the start block's drops are handled with this player as breaker.
+ *       The player's own {@code destroyBlock} only does that after the block was really removed, so
+ *       a refused removal never confirms, and another player's removal of the same block never
+ *       confirms this player's attempt.</li>
  *   <li>{@link #drain}: at the end of the tick only confirmed attempts whose start block is
- *       really gone start; every other attempt is dropped.</li>
+ *       still gone start; every other attempt is dropped.</li>
  * </ol>
+ *
+ * The single-block key ({@link #setBypass}) blocks new attempts and drops a pending one, so an
+ * update that arrives after the break but before the drain still keeps it a single block.
  *
  * @param <P> what the caller needs to start the operation
  */
@@ -36,18 +43,42 @@ public final class StartGate<P> {
     }
 
     private final Map<UUID, Attempt<P>> attempts = new LinkedHashMap<>();
+    private final Set<UUID> bypass = new HashSet<>();
 
-    /** Records an unconfirmed attempt; replaces any earlier attempt of the same player. */
-    public void attempt(UUID player, BlockPos pos, P payload) {
-        attempts.put(player, new Attempt<>(pos.immutable(), payload));
+    /** The single-block key was pressed or released. Pressing it drops the player's pending attempt. */
+    public void setBypass(UUID player, boolean active) {
+        if (active) {
+            bypass.add(player);
+            attempts.remove(player);
+        } else {
+            bypass.remove(player);
+        }
+    }
+
+    public boolean bypassActive(UUID player) {
+        return bypass.contains(player);
     }
 
     /**
-     * Marks the player's attempt at {@code pos} as having passed the whole break path.
+     * Records an unconfirmed attempt; replaces any earlier attempt of the same player.
+     *
+     * @return {@code false} if the single-block key is held; nothing is recorded then
+     */
+    public boolean attempt(UUID player, BlockPos pos, P payload) {
+        if (bypass.contains(player)) {
+            attempts.remove(player);
+            return false;
+        }
+        attempts.put(player, new Attempt<>(pos.immutable(), payload));
+        return true;
+    }
+
+    /**
+     * Marks the player's attempt at {@code pos} as removed by that player's own break.
      *
      * @return whether a matching attempt existed
      */
-    public boolean confirm(UUID player, BlockPos pos) {
+    public boolean confirmRemoved(UUID player, BlockPos pos) {
         Attempt<P> attempt = attempts.get(player);
         if (attempt == null || !attempt.pos.equals(pos)) {
             return false;
@@ -60,12 +91,20 @@ public final class StartGate<P> {
         return attempts.containsKey(player);
     }
 
+    /** Drops the player's attempt; the single-block key state stays. */
     public void forget(UUID player) {
         attempts.remove(player);
     }
 
+    /** Drops everything known about the player (logout). */
+    public void removePlayer(UUID player) {
+        attempts.remove(player);
+        bypass.remove(player);
+    }
+
     public void clear() {
         attempts.clear();
+        bypass.clear();
     }
 
     /**

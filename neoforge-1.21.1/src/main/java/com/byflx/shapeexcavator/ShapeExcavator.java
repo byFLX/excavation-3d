@@ -30,6 +30,8 @@ public final class ShapeExcavator {
         gameBus.addListener(ModNetwork::onServerStopped);
         // Lowest priority: protection mods decide first; cancelled breaks are not delivered here.
         gameBus.addListener(EventPriority.LOWEST, ExcavationService::onBreak);
+        // Drops are handled only after a successful removal; cancelled drops still prove it.
+        gameBus.addListener(EventPriority.LOWEST, true, ExcavationService::onBlockDrops);
         gameBus.addListener(ExcavationService::onLeftClickBlock);
         gameBus.addListener(ExcavationService::onServerTick);
         gameBus.addListener(ExcavationService::onLogout);

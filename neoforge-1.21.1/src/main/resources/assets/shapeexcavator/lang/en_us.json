@@ -60,6 +60,7 @@
   "message.shapeexcavator.reject.invalid": "Rejected by the server: %1$s",
   "message.shapeexcavator.busy": "Still excavating - single block only",
   "message.shapeexcavator.invalid_single_block": "Shape not allowed: %1$s - single block only",
+  "message.shapeexcavator.creative_single_block": "Creative mode: shapes need survival mining - single block only",
   "message.shapeexcavator.result": "Shape excavation: %1$s mined, %2$s skipped",
   "message.shapeexcavator.aborted": "Shape excavation stopped (%1$s): %2$s mined, %3$s skipped",
 

@@ -60,6 +60,7 @@
   "message.shapeexcavator.reject.invalid": "Vom Server abgelehnt: %1$s",
   "message.shapeexcavator.busy": "Formabbau läuft noch – nur Einzelblock",
   "message.shapeexcavator.invalid_single_block": "Form nicht erlaubt: %1$s – nur Einzelblock",
+  "message.shapeexcavator.creative_single_block": "Kreativmodus: Formabbau nur im Überlebensmodus – nur Einzelblock",
   "message.shapeexcavator.result": "Formabbau: %1$s abgebaut, %2$s übersprungen",
   "message.shapeexcavator.aborted": "Formabbau beendet (%1$s): %2$s abgebaut, %3$s übersprungen",
 
