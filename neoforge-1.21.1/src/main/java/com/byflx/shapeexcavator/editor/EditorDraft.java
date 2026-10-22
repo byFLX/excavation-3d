@@ -208,9 +208,10 @@ public final class EditorDraft {
     }
 
     /**
-     * "Edit as custom shape" (plan §6.5): the current template's local, untransformed mask becomes
-     * the custom grid and the transform is kept, so the resulting selection is unchanged. Returns
-     * false when the current template is invalid or already custom.
+     * The custom shape icon on a template (plan §6.5): the current template's local, untransformed
+     * mask becomes the custom grid and the transform is kept, so the resulting selection is
+     * unchanged. The replacement is one undo step of the custom grid, so the previous custom shape
+     * can be restored. Returns false when the current template is invalid or already custom.
      */
     public boolean convertToCustom(ShapeLimits limits) {
         if (type == ShapeType.CUSTOM) {
@@ -225,7 +226,7 @@ public final class EditorDraft {
         if (!(local instanceof ShapeGenerator.Valid valid)) {
             return false;
         }
-        custom = CustomMaskDraft.fromMask(valid.shape().mask());
+        custom.replaceWith(valid.shape().mask());
         syncCustomTexts();
         type = ShapeType.CUSTOM;
         return true;

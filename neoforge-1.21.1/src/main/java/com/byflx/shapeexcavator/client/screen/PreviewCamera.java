@@ -5,7 +5,8 @@ import net.minecraft.util.Mth;
 /**
  * View state of the editor's 3D preview (plan §5). Purely visual: it never changes shape data and
  * never triggers shape generation. {@code yaw} turns around the vertical axis, {@code elevation}
- * looks down from above (90 = top view).
+ * looks down from above (90 = top view). Dragging rotates, the mouse wheel zooms and a double-click
+ * resets; the zoom multiplies the renderer's fixed block scale.
  */
 public final class PreviewCamera {
     private static final float DEFAULT_YAW = -35.0F;
@@ -36,26 +37,10 @@ public final class PreviewCamera {
         zoom = Mth.clamp(zoom * (float) Math.pow(1.15, amount), 0.3F, 4.0F);
     }
 
-    public void front() {
-        set(0.0F, 0.0F);
-    }
-
-    /** Looks at the right side (local +width face). */
-    public void side() {
-        set(-90.0F, 0.0F);
-    }
-
-    public void top() {
-        set(0.0F, 90.0F);
-    }
-
+    /** Double-click in the preview: default angle and no user zoom. */
     public void reset() {
-        set(DEFAULT_YAW, DEFAULT_ELEVATION);
+        yaw = DEFAULT_YAW;
+        elevation = DEFAULT_ELEVATION;
         zoom = 1.0F;
-    }
-
-    private void set(float newYaw, float newElevation) {
-        yaw = newYaw;
-        elevation = newElevation;
     }
 }

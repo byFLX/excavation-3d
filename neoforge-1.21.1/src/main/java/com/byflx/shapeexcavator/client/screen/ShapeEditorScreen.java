@@ -12,6 +12,7 @@ import com.byflx.shapeexcavator.net.ApplyShapePayload;
 import com.byflx.shapeexcavator.net.BeginEditPayload;
 import com.byflx.shapeexcavator.net.EditSessionPayload;
 import com.byflx.shapeexcavator.net.RemoveShapePayload;
+import com.byflx.shapeexcavator.preview.ShapeDiff;
 import com.byflx.shapeexcavator.registry.ModComponents;
 import com.byflx.shapeexcavator.shape.Cell;
 import com.byflx.shapeexcavator.shape.GeneratedShape;
@@ -22,28 +23,35 @@ import com.byflx.shapeexcavator.shape.ShapeLimits;
 import com.byflx.shapeexcavator.shape.ShapeType;
 import com.byflx.shapeexcavator.text.ShapeTexts;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 import net.neoforged.neoforge.network.PacketDistributor;
+import org.lwjgl.glfw.GLFW;
 
 /**
- * The shape editor (plan §2–§6). Left: shape type, free numeric fields with optional +/- buttons,
- * direction, transform and the custom layer editor. Right: the 3D preview of the selected blocks.
- * Bottom: summary, presets and the actions.
+ * The shape editor (plan §2–§6, simplified by the operator correction of 2026-10-22). Left: one row
+ * of shape type icons, free numeric fields with +/- buttons, direction and the custom layer editor.
+ * Right: the 3D preview of the selected blocks with Rotate and Mirror icons; drag rotates, the wheel
+ * zooms and a double-click resets the view. Header: the Presets menu (load, save, delete, remove
+ * shape). Bottom: summary, the world preview checkbox, Cancel and Apply.
  *
  * <p>Everything the user changes lives in an {@link EditorDraft}; widgets are rebuilt from it in
  * {@link #init()}, so window resizing and GUI scale changes keep the draft. The draft only reaches
@@ -55,13 +63,27 @@ public final class ShapeEditorScreen extends Screen {
     private static final int MARGIN = 6;
     private static final int FIELD_WIDTH = 40;
     private static final int STEP_WIDTH = 16;
+    private static final int ICON_SIZE = 16;
+    private static final long DOUBLE_CLICK_MS = 350L;
     private static final int TEXT = 0xE0E0E0;
     private static final int MUTED = 0x909090;
     private static final int OK = 0x55FF55;
     private static final int ERROR = 0xFF5555;
     private static final int WARN = 0xFFDD55;
 
+    /** Procedural type icons: a front view for cuboid, plus and custom, a side view for the stairs. */
+    private static final Map<ShapeType, String[]> TYPE_ICONS = new EnumMap<>(Map.of(
+            ShapeType.CUBOID, new String[] {"#####", "#####", "#####", "#####", "#####"},
+            ShapeType.PLUS, new String[] {"..#..", "..#..", "#####", "..#..", "..#.."},
+            ShapeType.STAIR, new String[] {"#....", "##...", "###..", "####.", "#####"},
+            ShapeType.CORRIDOR, new String[] {"...##", "..###", ".###.", "###..", "##..."},
+            ShapeType.CUSTOM, new String[] {"#.#.#", ".#.#.", "#.#.#", ".#.#.", "#.#.#"}));
+
     private record RowLabel(Component text, int baseY) {
+    }
+
+    private enum Menu {
+        NONE, PRESETS, LAYER
     }
 
     private final int slot;
@@ -72,14 +94,18 @@ public final class ShapeEditorScreen extends Screen {
     private boolean resultView;
     private EditorDraft.Evaluation evaluation;
     private GeneratedShape lastValid;
+    /** Set by size edits; the next refresh flashes the added and removed cells. */
+    private boolean sizeEdited;
     private final PreviewCamera camera = new PreviewCamera();
     private final ShapePreviewRenderer preview = new ShapePreviewRenderer();
+    private long lastPreviewClick;
+    private double lastPreviewClickX;
+    private double lastPreviewClickY;
 
     private final SessionHandshake handshake = new SessionHandshake();
     private long revision;
     private boolean awaitingReply;
     private boolean awaitingRemove;
-    private boolean closeAfterApply;
     private Component status = Component.translatable("gui.shapeexcavator.status.connecting");
     private int statusColor = MUTED;
 
@@ -100,25 +126,30 @@ public final class ShapeEditorScreen extends Screen {
     private int previewY0;
     private int previewX1;
     private int previewY1;
+    private int statusY;
     private int summaryY;
+    private int actionY;
     private int gridBaseY = -1;
     private int cellSize;
 
     private final Map<AbstractWidget, Integer> scrolledWidgets = new LinkedHashMap<>();
+    /** Widgets on the preview; drawn after it, so the preview never covers them. */
+    private final List<AbstractWidget> previewWidgets = new ArrayList<>();
     private final List<RowLabel> labels = new ArrayList<>();
     private final Map<String, EditBox> fieldBoxes = new HashMap<>();
     private EditBox layerBox;
-    private EditBox presetName;
-    private CycleButton<Boolean> worldPreviewButton;
+    private Button layerMenuButton;
     private Button applyButton;
-    private Button applyShowButton;
-    private Button removeButton;
     private Button undoButton;
     private Button redoButton;
-    private Button pasteButton;
     private Button anchorButton;
     private Button resizeConfirmButton;
     private Button resizeCancelButton;
+
+    private Menu openMenu = Menu.NONE;
+    private DropdownMenu menu;
+    private EditBox presetName;
+    private Button presetSave;
 
     public ShapeEditorScreen(Player player) {
         super(Component.translatable("gui.shapeexcavator.title"));
@@ -145,15 +176,21 @@ public final class ShapeEditorScreen extends Screen {
     @Override
     protected void init() {
         scrolledWidgets.clear();
+        previewWidgets.clear();
         labels.clear();
         fieldBoxes.clear();
         layerBox = null;
+        layerMenuButton = null;
         undoButton = null;
         redoButton = null;
-        pasteButton = null;
         anchorButton = null;
         resizeConfirmButton = null;
         resizeCancelButton = null;
+        // A rebuild (resize, GUI scale, type change, preset load) closes an open menu.
+        openMenu = Menu.NONE;
+        menu = null;
+        presetName = null;
+        presetSave = null;
         gridBaseY = -1;
         layout();
         if (handshake.state() == SessionHandshake.State.IDLE) {
@@ -161,30 +198,13 @@ public final class ShapeEditorScreen extends Screen {
         }
 
         int y = contentTop;
-        CycleButton<ShapeType> typeButton = CycleButton.<ShapeType>builder(ShapeTexts::typeName)
-                .withValues(ShapeType.values())
-                .withInitialValue(draft.type())
-                .create(leftX, y, leftW, 20, Component.translatable("gui.shapeexcavator.shape"),
-                        (button, value) -> changeType(value));
-        scrolled(typeButton, y);
+        typeRow(y);
         y += ROW;
         for (String field : EditorDraft.fields(draft.type())) {
             fieldRow(field, y);
             y += ROW;
         }
         switch (draft.type()) {
-            case CUBOID -> {
-                buttonRow(y,
-                        Button.builder(Component.translatable("gui.shapeexcavator.template.surface"), b -> {
-                            draft.applySurfaceTemplate();
-                            syncFieldBoxes();
-                        }),
-                        Button.builder(Component.translatable("gui.shapeexcavator.template.line"), b -> {
-                            draft.applyLineTemplate();
-                            syncFieldBoxes();
-                        }));
-                y += ROW;
-            }
             case STAIR, CORRIDOR -> {
                 boolean stair = draft.type() == ShapeType.STAIR;
                 CycleButton<Boolean> direction = CycleButton.booleanBuilder(
@@ -205,33 +225,20 @@ public final class ShapeEditorScreen extends Screen {
                 labels.add(new RowLabel(Component.translatable("gui.shapeexcavator.stair_orientation"), y - 4));
                 y += 12;
             }
-            case CUSTOM -> y = customRows(y);
+            case CUSTOM -> {
+                y = customRows(y);
+                gridBaseY = y;
+            }
             default -> {
             }
-        }
-        buttonRow(y,
-                Button.builder(Component.translatable("gui.shapeexcavator.rotate"), b -> {
-                    draft.rotateClockwise();
-                    changed();
-                }),
-                Button.builder(Component.translatable("gui.shapeexcavator.mirror"), b -> {
-                    draft.toggleMirror();
-                    changed();
-                }));
-        y += ROW;
-        if (draft.type() != ShapeType.CUSTOM) {
-            buttonRow(y, Button.builder(Component.translatable("gui.shapeexcavator.to_custom"), b -> convertToCustom()));
-            y += ROW;
-        } else {
-            gridBaseY = y;
         }
         contentHeight = y - contentTop;
         layoutGrid();
         scroll = Mth.clamp(scroll, 0, maxScroll());
 
-        initViewRow();
-        initPresetRow();
-        initActionRow();
+        initPreviewButtons();
+        initHeader();
+        initBottom();
         refresh();
     }
 
@@ -240,15 +247,31 @@ public final class ShapeEditorScreen extends Screen {
     private void layout() {
         leftX = MARGIN;
         leftW = Mth.clamp((int) (width * 0.42F), 150, 230);
-        int actionY = height - 26;
-        int presetY = actionY - 22;
-        summaryY = presetY - 24;
-        contentTop = 20;
-        contentBottom = summaryY - 4;
+        actionY = height - 24;
+        summaryY = actionY - 22;
+        statusY = summaryY - 11;
+        contentTop = 22;
+        contentBottom = statusY - 3;
         previewX0 = leftX + leftW + 10;
         previewX1 = width - MARGIN;
         previewY0 = contentTop;
-        previewY1 = Math.max(previewY0 + 20, contentBottom - 22);
+        previewY1 = Math.max(previewY0 + 20, contentBottom);
+    }
+
+    /** One icon per shape type; the custom icon turns a valid template into a custom shape. */
+    private void typeRow(int y) {
+        ShapeType[] types = ShapeType.values();
+        int gap = 2;
+        int w = (leftW - gap * (types.length - 1)) / types.length;
+        for (int i = 0; i < types.length; i++) {
+            ShapeType type = types[i];
+            Component label = CommonComponents.optionNameValue(Component.translatable("gui.shapeexcavator.shape"),
+                    ShapeTexts.typeName(type));
+            IconButton button = IconButton.pattern(leftX + i * (w + gap), y, w, 20, label, b -> selectType(type),
+                    TYPE_ICONS.get(type));
+            button.setSelected(type == draft.type());
+            scrolled(button, y);
+        }
     }
 
     private void fieldRow(String field, int y) {
@@ -287,18 +310,14 @@ public final class ShapeEditorScreen extends Screen {
                 .bounds(nextX, y, STEP_WIDTH, 20).build(), y);
         y += ROW;
 
-        List<Button> layerOps = buttonRow(y,
-                Button.builder(Component.translatable("gui.shapeexcavator.layer.copy"), b -> {
-                    draft.custom().copyLayer(layer);
+        List<Button> tools = buttonRow(y,
+                Button.builder(Component.translatable("gui.shapeexcavator.layer.menu"), b -> toggleLayerMenu()),
+                Button.builder(Component.translatable("gui.shapeexcavator.anchor"), b -> {
+                    anchorMode = !anchorMode;
                     refresh();
-                }),
-                Button.builder(Component.translatable("gui.shapeexcavator.layer.paste"),
-                        b -> customEdited(draft.custom().pasteLayer(layer))),
-                Button.builder(Component.translatable("gui.shapeexcavator.layer.fill"),
-                        b -> customEdited(draft.custom().fillLayer(layer, true))),
-                Button.builder(Component.translatable("gui.shapeexcavator.layer.clear"),
-                        b -> customEdited(draft.custom().fillLayer(layer, false))));
-        pasteButton = layerOps.get(1);
+                }));
+        layerMenuButton = tools.get(0);
+        anchorButton = tools.get(1);
         y += ROW;
 
         List<Button> history = buttonRow(y,
@@ -311,14 +330,9 @@ public final class ShapeEditorScreen extends Screen {
                     if (draft.custom().redo()) {
                         afterCustomStructureChange();
                     }
-                }),
-                Button.builder(Component.translatable("gui.shapeexcavator.anchor"), b -> {
-                    anchorMode = !anchorMode;
-                    refresh();
                 }));
         undoButton = history.get(0);
         redoButton = history.get(1);
-        anchorButton = history.get(2);
         y += ROW;
 
         List<Button> resize = buttonRow(y,
@@ -344,78 +358,66 @@ public final class ShapeEditorScreen extends Screen {
         return buttons;
     }
 
-    private void initViewRow() {
+    /** Rotate and Mirror (plus the schematic result view for stairs) in the preview's top right corner. */
+    private void initPreviewButtons() {
         boolean stairLike = draft.type() == ShapeType.STAIR || draft.type() == ShapeType.CORRIDOR;
-        List<Button.Builder> builders = new ArrayList<>(List.of(
-                Button.builder(Component.translatable("gui.shapeexcavator.view.front"), b -> camera.front()),
-                Button.builder(Component.translatable("gui.shapeexcavator.view.side"), b -> camera.side()),
-                Button.builder(Component.translatable("gui.shapeexcavator.view.top"), b -> camera.top()),
-                Button.builder(Component.translatable("gui.shapeexcavator.view.reset"), b -> camera.reset())));
-        if (stairLike) {
-            builders.add(Button.builder(Component.translatable("gui.shapeexcavator.view.result"), b -> {
-                resultView = !resultView;
-            }).tooltip(Tooltip.create(Component.translatable("gui.shapeexcavator.view.result.tooltip"))));
-        } else {
+        if (!stairLike) {
             resultView = false;
         }
-        int gap = 2;
-        int total = previewX1 - previewX0;
-        int w = (total - gap * (builders.size() - 1)) / builders.size();
-        for (int i = 0; i < builders.size(); i++) {
-            addRenderableWidget(builders.get(i).bounds(previewX0 + i * (w + gap), previewY1 + 2, w, 20).build());
+        int x = previewX1 - 2 - ICON_SIZE;
+        int y = previewY0 + 2;
+        previewWidget(IconButton.glyph(x, y, ICON_SIZE, Component.translatable("gui.shapeexcavator.rotate"), "↻", b -> {
+            draft.rotateClockwise();
+            changed();
+        }));
+        x -= ICON_SIZE + 2;
+        previewWidget(IconButton.glyph(x, y, ICON_SIZE, Component.translatable("gui.shapeexcavator.mirror"), "⇆", b -> {
+            draft.toggleMirror();
+            changed();
+        }));
+        if (stairLike) {
+            x -= ICON_SIZE + 2;
+            IconButton result = IconButton.glyph(x, y, ICON_SIZE,
+                    Component.translatable("gui.shapeexcavator.view.result.tooltip"), "▤", b -> {
+                        resultView = !resultView;
+                        ((IconButton) b).setSelected(resultView);
+                    });
+            result.setSelected(resultView);
+            previewWidget(result);
         }
     }
 
-    private void initPresetRow() {
-        int y = height - 26 - 22;
-        int x = MARGIN;
-        int nameW = Mth.clamp((width - 2 * MARGIN) / 3, 80, 160);
-        presetName = new EditBox(font, x + 1, y + 1, nameW - 2, 18, Component.translatable("gui.shapeexcavator.preset.name"));
-        presetName.setMaxLength(PresetRepository.MAX_NAME_LENGTH);
-        presetName.setHint(Component.translatable("gui.shapeexcavator.preset.name"));
-        presetName.setValue(presetCursor);
-        presetName.setResponder(text -> presetCursor = text);
-        addRenderableWidget(presetName);
-        x += nameW + 2;
-        int rest = width - MARGIN - x;
-        int small = 16;
-        int w = (rest - 2 * small - 4 * 2) / 3;
-        addRenderableWidget(Button.builder(Component.literal("<"), b -> cyclePreset(-1)).bounds(x, y, small, 20).build());
-        x += small + 2;
-        addRenderableWidget(Button.builder(Component.literal(">"), b -> cyclePreset(1)).bounds(x, y, small, 20).build());
-        x += small + 2;
-        addRenderableWidget(Button.builder(Component.translatable("gui.shapeexcavator.preset.load"), b -> loadPreset())
-                .bounds(x, y, w, 20).build());
-        x += w + 2;
-        addRenderableWidget(Button.builder(Component.translatable("gui.shapeexcavator.preset.save"), b -> savePreset())
-                .bounds(x, y, w, 20).build());
-        x += w + 2;
-        addRenderableWidget(Button.builder(Component.translatable("gui.shapeexcavator.preset.delete"), b -> deletePreset())
-                .bounds(x, y, w, 20).build());
+    private void previewWidget(AbstractWidget widget) {
+        previewWidgets.add(widget);
+        addWidget(widget);
     }
 
-    private void initActionRow() {
-        int y = height - 26;
-        int gap = 2;
-        int w = (width - 2 * MARGIN - 4 * gap) / 5;
-        int x = MARGIN;
-        addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> onClose())
-                .bounds(x, y, w, 20).build());
-        x += w + gap;
-        removeButton = addRenderableWidget(Button.builder(Component.translatable("gui.shapeexcavator.remove"),
-                b -> removeShape()).bounds(x, y, w, 20).build());
-        x += w + gap;
-        worldPreviewButton = addRenderableWidget(CycleButton.onOffBuilder(worldPreview)
-                .create(x, y, w, 20, Component.translatable("gui.shapeexcavator.world_preview"), (button, value) -> {
+    private void initHeader() {
+        Component label = Component.translatable("gui.shapeexcavator.presets");
+        int w = Math.max(70, font.width(label) + 16);
+        addRenderableWidget(Button.builder(label, b -> togglePresetsMenu())
+                .bounds(width - MARGIN - w, 2, w, 18).build());
+    }
+
+    private void initBottom() {
+        Checkbox checkbox = Checkbox.builder(Component.translatable("gui.shapeexcavator.world_preview"), font)
+                .pos(0, summaryY)
+                .selected(worldPreview)
+                .onValueChange((box, value) -> {
                     worldPreview = value;
                     saveState.edited();
-                }));
-        x += w + gap;
+                })
+                .build();
+        checkbox.setX(width - MARGIN - checkbox.getWidth());
+        addRenderableWidget(checkbox);
+
+        int gap = 2;
+        int w = Mth.clamp((width - 2 * MARGIN - gap) / 4, 60, 100);
+        int applyX = width - MARGIN - w;
+        addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> onClose())
+                .bounds(applyX - gap - w, actionY, w, 20).build());
         applyButton = addRenderableWidget(Button.builder(Component.translatable("gui.shapeexcavator.apply"),
-                b -> apply(false)).bounds(x, y, w, 20).build());
-        x += w + gap;
-        applyShowButton = addRenderableWidget(Button.builder(Component.translatable("gui.shapeexcavator.apply_show"),
-                b -> apply(true)).bounds(x, y, w, 20).build());
+                b -> apply()).bounds(applyX, actionY, w, 20).build());
     }
 
     private <T extends AbstractWidget> T scrolled(T widget, int baseY) {
@@ -451,6 +453,103 @@ public final class ShapeEditorScreen extends Screen {
         return leftX + (leftW - cellSize * draft.custom().width()) / 2;
     }
 
+    // ---------------------------------------------------------------- menus
+
+    private void closeMenu() {
+        if (presetName != null) {
+            presetCursor = presetName.getValue();
+            removeWidget(presetName);
+            removeWidget(presetSave);
+        }
+        presetName = null;
+        presetSave = null;
+        menu = null;
+        openMenu = Menu.NONE;
+    }
+
+    private void togglePresetsMenu() {
+        boolean wasOpen = openMenu == Menu.PRESETS;
+        closeMenu();
+        if (!wasOpen) {
+            openPresetsMenu();
+        }
+    }
+
+    /**
+     * Presets (plan §9): a name field with Save, the saved presets (click loads, × deletes) and,
+     * separated, "Remove shape" for the tool itself.
+     */
+    private void openPresetsMenu() {
+        int menuW = Math.min(width - 2 * MARGIN, 180);
+        int x = width - MARGIN - menuW;
+        int y = contentTop;
+        int header = 24;
+        List<DropdownMenu.Entry> entries = new ArrayList<>();
+        List<String> names = PresetRepository.get().names();
+        if (names.isEmpty()) {
+            entries.add(new DropdownMenu.Entry(Component.translatable("gui.shapeexcavator.preset.none"), () -> false,
+                    () -> {
+                    }, null));
+        }
+        for (String name : names) {
+            entries.add(new DropdownMenu.Entry(Component.literal(name), () -> true, () -> loadPreset(name),
+                    () -> deletePreset(name)));
+        }
+        entries.add(DropdownMenu.Entry.separator());
+        entries.add(new DropdownMenu.Entry(Component.translatable("gui.shapeexcavator.remove"), this::canRemove,
+                () -> {
+                    closeMenu();
+                    removeShape();
+                }, null));
+        menu = new DropdownMenu(x, y, menuW, header, height - 30, entries,
+                Component.translatable("gui.shapeexcavator.preset.delete"));
+        openMenu = Menu.PRESETS;
+
+        Component saveLabel = Component.translatable("gui.shapeexcavator.preset.save");
+        int saveW = Math.max(40, font.width(saveLabel) + 10);
+        presetName = new EditBox(font, x + 4, y + 4, menuW - 8 - saveW - 2, 16,
+                Component.translatable("gui.shapeexcavator.preset.name"));
+        presetName.setMaxLength(PresetRepository.MAX_NAME_LENGTH);
+        presetName.setHint(Component.translatable("gui.shapeexcavator.preset.name"));
+        presetName.setValue(presetCursor);
+        presetSave = Button.builder(saveLabel, b -> savePreset())
+                .bounds(x + menuW - 4 - saveW, y + 3, saveW, 18).build();
+        addWidget(presetName);
+        addWidget(presetSave);
+        setFocused(presetName);
+    }
+
+    private void toggleLayerMenu() {
+        boolean wasOpen = openMenu == Menu.LAYER;
+        closeMenu();
+        if (wasOpen || layerMenuButton == null) {
+            return;
+        }
+        List<DropdownMenu.Entry> entries = List.of(
+                DropdownMenu.Entry.of(Component.translatable("gui.shapeexcavator.layer.copy"), () -> {
+                    draft.custom().copyLayer(layer);
+                    closeMenu();
+                    refresh();
+                }),
+                new DropdownMenu.Entry(Component.translatable("gui.shapeexcavator.layer.paste"),
+                        () -> draft.custom().hasClipboard(), () -> {
+                            closeMenu();
+                            customEdited(draft.custom().pasteLayer(layer));
+                        }, null),
+                DropdownMenu.Entry.of(Component.translatable("gui.shapeexcavator.layer.fill"), () -> {
+                    closeMenu();
+                    customEdited(draft.custom().fillLayer(layer, true));
+                }),
+                DropdownMenu.Entry.of(Component.translatable("gui.shapeexcavator.layer.clear"), () -> {
+                    closeMenu();
+                    customEdited(draft.custom().fillLayer(layer, false));
+                }));
+        int menuW = Math.max(layerMenuButton.getWidth(), 90);
+        menu = new DropdownMenu(layerMenuButton.getX(), layerMenuButton.getY() + 20, menuW, 0, height - 4, entries,
+                Component.empty());
+        openMenu = Menu.LAYER;
+    }
+
     // ---------------------------------------------------------------- state changes
 
     private ShapeLimits limits() {
@@ -460,6 +559,17 @@ public final class ShapeEditorScreen extends Screen {
     private void changed() {
         saveState.edited();
         refresh();
+    }
+
+    private void selectType(ShapeType type) {
+        if (type == draft.type()) {
+            return;
+        }
+        if (type == ShapeType.CUSTOM) {
+            convertToCustom();
+        } else {
+            changeType(type);
+        }
     }
 
     private void changeType(ShapeType type) {
@@ -474,6 +584,7 @@ public final class ShapeEditorScreen extends Screen {
     private void onFieldEdited(String field, String text) {
         draft.setText(field, text);
         saveState.edited();
+        sizeEdited = true;
         if (draft.type() == ShapeType.CUSTOM) {
             handleCustomResize();
         }
@@ -484,7 +595,7 @@ public final class ShapeEditorScreen extends Screen {
         draft.stepped(field, delta, limits()).ifPresent(text -> fieldBoxes.get(field).setValue(text));
     }
 
-    /** Writes the draft's texts back into the boxes, e.g. after a template or undo changed them. */
+    /** Writes the draft's texts back into the boxes, e.g. after undo changed them. */
     private void syncFieldBoxes() {
         for (Map.Entry<String, EditBox> entry : fieldBoxes.entrySet()) {
             String text = draft.text(entry.getKey());
@@ -521,6 +632,7 @@ public final class ShapeEditorScreen extends Screen {
             pendingResize = null;
             saveState.edited();
             afterResize();
+            sizeEdited = true;
             refresh();
         }
     }
@@ -567,13 +679,21 @@ public final class ShapeEditorScreen extends Screen {
         }
     }
 
+    /**
+     * The custom icon on a template: a valid template becomes the custom grid (one undo step, so
+     * Undo brings back the previous custom shape). An invalid template switches to the existing
+     * custom draft and says why it was not converted.
+     */
     private void convertToCustom() {
         if (draft.convertToCustom(limits())) {
             layer = 0;
             scroll = 0;
+            anchorMode = false;
+            pendingResize = null;
             saveState.edited();
             rebuildWidgets();
         } else {
+            changeType(ShapeType.CUSTOM);
             setStatus(Component.translatable("gui.shapeexcavator.to_custom.invalid"), ERROR);
         }
     }
@@ -584,8 +704,14 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private void refresh() {
+        GeneratedShape before = lastValid;
         evaluation = draft.evaluate(limits());
-        evaluation.shape().ifPresent(shape -> lastValid = shape);
+        Optional<GeneratedShape> shape = evaluation.shape();
+        if (sizeEdited && before != null && shape.isPresent() && !shape.get().equals(before)) {
+            preview.highlight(ShapeDiff.between(before, shape.get()), shape.get());
+        }
+        sizeEdited = false;
+        shape.ifPresent(s -> lastValid = s);
         for (Map.Entry<String, EditBox> entry : fieldBoxes.entrySet()) {
             NumericInput.Problem problem = evaluation.fieldErrors().get(entry.getKey());
             entry.getValue().setTextColor(problem == null ? TEXT : ERROR);
@@ -595,7 +721,6 @@ public final class ShapeEditorScreen extends Screen {
         if (undoButton != null) {
             undoButton.active = draft.custom().canUndo();
             redoButton.active = draft.custom().canRedo();
-            pasteButton.active = draft.custom().hasClipboard();
             anchorButton.setMessage(Component.translatable(anchorMode
                     ? "gui.shapeexcavator.anchor.picking" : "gui.shapeexcavator.anchor"));
         }
@@ -604,11 +729,8 @@ public final class ShapeEditorScreen extends Screen {
                     Component.translatable("gui.shapeexcavator.resize.confirm", pendingResize.lostCells()));
         }
         if (applyButton != null) {
-            boolean canApply = canApply();
-            applyButton.active = canApply;
-            applyShowButton.active = canApply;
+            applyButton.active = canApply();
         }
-        updateRemoveButton();
         applyScroll();
     }
 
@@ -622,34 +744,18 @@ public final class ShapeEditorScreen extends Screen {
                 && minecraft.player.getInventory().getItem(slot).has(ModComponents.TOOL_SHAPE.get());
     }
 
-    private void updateRemoveButton() {
-        if (removeButton != null) {
-            removeButton.active = canRemove();
-        }
-    }
-
     // ---------------------------------------------------------------- presets
 
-    private void cyclePreset(int direction) {
-        List<String> names = PresetRepository.get().names();
-        if (names.isEmpty()) {
-            setStatus(Component.translatable("gui.shapeexcavator.preset.none"), MUTED);
-            return;
-        }
-        int index = names.indexOf(presetName.getValue().trim());
-        int next = index < 0 ? (direction > 0 ? 0 : names.size() - 1) : Math.floorMod(index + direction, names.size());
-        presetName.setValue(names.get(next));
-    }
-
-    private void loadPreset() {
-        String name = presetName.getValue();
+    private void loadPreset(String name) {
         Optional<ShapeConfig> preset = PresetRepository.get().find(name);
         if (preset.isEmpty()) {
             setStatus(Component.translatable("gui.shapeexcavator.preset.missing", name.trim()), ERROR);
+            closeMenu();
             return;
         }
         // Loaded as a draft; the evaluation applies this server's limits again.
         draft = EditorDraft.fromConfig(preset.get());
+        presetCursor = name;
         pendingResize = null;
         anchorMode = false;
         layer = 0;
@@ -664,9 +770,12 @@ public final class ShapeEditorScreen extends Screen {
             setStatus(Component.translatable("gui.shapeexcavator.preset.unsavable"), ERROR);
             return;
         }
-        String name = presetName.getValue();
+        String name = presetName == null ? presetCursor : presetName.getValue();
         switch (PresetRepository.get().save(name, evaluation.config())) {
-            case SAVED -> setStatus(Component.translatable("gui.shapeexcavator.preset.saved", name.trim()), OK);
+            case SAVED -> {
+                setStatus(Component.translatable("gui.shapeexcavator.preset.saved", name.trim()), OK);
+                closeMenu();
+            }
             case INVALID_NAME -> setStatus(Component.translatable("gui.shapeexcavator.preset.invalid_name",
                     PresetRepository.MAX_NAME_LENGTH), ERROR);
             case FULL -> setStatus(Component.translatable("gui.shapeexcavator.preset.full",
@@ -675,31 +784,25 @@ public final class ShapeEditorScreen extends Screen {
         }
     }
 
-    private void deletePreset() {
-        String name = presetName.getValue();
+    private void deletePreset(String name) {
         if (PresetRepository.get().delete(name)) {
             setStatus(Component.translatable("gui.shapeexcavator.preset.deleted", name.trim()), OK);
         } else {
             setStatus(Component.translatable("gui.shapeexcavator.preset.missing", name.trim()), ERROR);
         }
+        // Reopen, so the list shows the remaining presets.
+        closeMenu();
+        openPresetsMenu();
     }
 
     // ---------------------------------------------------------------- server protocol
 
-    private void apply(boolean showInWorld) {
+    private void apply() {
         if (!canApply()) {
             return;
         }
         awaitingReply = true;
         submittedGeneration = saveState.submit();
-        closeAfterApply = showInWorld;
-        if (showInWorld) {
-            // Draft value and toggle change together, so the editor never shows OFF for an ON request.
-            worldPreview = true;
-            if (worldPreviewButton != null) {
-                worldPreviewButton.setValue(true);
-            }
-        }
         setStatus(Component.translatable("gui.shapeexcavator.status.applying"), MUTED);
         PacketDistributor.sendToServer(new ApplyShapePayload(handshake.sessionId(), slot, revision,
                 evaluation.config(), worldPreview));
@@ -707,8 +810,8 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     /**
-     * "Remove shape" (plan §2a): the server deletes the whole component, so the tool mines like
-     * vanilla again. The draft stays, so the shape can be applied again from here.
+     * "Remove shape" (plan §2a), in the Presets menu: the server deletes the whole component, so the
+     * tool mines like vanilla again. The draft stays, so the shape can be applied again from here.
      */
     private void removeShape() {
         if (!canRemove()) {
@@ -724,7 +827,6 @@ public final class ShapeEditorScreen extends Screen {
     @Override
     public void tick() {
         super.tick();
-        updateRemoveButton();
         // Only runs while this screen is shown; behind the discard dialog the wait pauses.
         int retry = handshake.tick();
         if (retry != 0) {
@@ -770,21 +872,13 @@ public final class ShapeEditorScreen extends Screen {
         }
         if (payload.accepted()) {
             revision = payload.revision();
-            boolean allSaved = saveState.accepted(submittedGeneration);
-            boolean close = closeAfterApply;
-            closeAfterApply = false;
-            if (!allSaved) {
+            if (!saveState.accepted(submittedGeneration)) {
                 // Edits made while waiting are not part of the confirmed shape: keep them, stay open.
                 setStatus(Component.translatable("gui.shapeexcavator.status.applied_newer_unsaved"), WARN);
             } else {
                 setStatus(payload.message(), OK);
-                if (close) {
-                    closeNow();
-                    return;
-                }
             }
         } else {
-            closeAfterApply = false;
             setStatus(payload.message(), ERROR);
         }
         refresh();
@@ -836,11 +930,56 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (menu != null) {
+            // Escape closes the open menu first, not the editor.
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                closeMenu();
+                return true;
+            }
+            if (presetName != null && getFocused() == presetName
+                    && (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)) {
+                savePreset();
+                return true;
+            }
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
     public boolean mouseClicked(double mx, double my, int button) {
+        if (menu != null) {
+            // The open menu takes every click; a click outside only closes it.
+            if (presetName != null && presetName.mouseClicked(mx, my, button)) {
+                setFocused(presetName);
+                return true;
+            }
+            if (presetSave != null && presetSave.mouseClicked(mx, my, button)) {
+                return true;
+            }
+            if (button == 0 && menu.click(mx, my)) {
+                return true;
+            }
+            if (!menu.contains(mx, my)) {
+                closeMenu();
+            }
+            return true;
+        }
         if (super.mouseClicked(mx, my, button)) {
             return true;
         }
         if (button == 0 && inPreview(mx, my)) {
+            long now = Util.getMillis();
+            if (now - lastPreviewClick <= DOUBLE_CLICK_MS && Math.abs(mx - lastPreviewClickX) < 4
+                    && Math.abs(my - lastPreviewClickY) < 4) {
+                camera.reset();
+                preview.resetScale();
+                lastPreviewClick = 0L;
+            } else {
+                lastPreviewClick = now;
+                lastPreviewClickX = mx;
+                lastPreviewClickY = my;
+            }
             draggingCamera = true;
             return true;
         }
@@ -889,6 +1028,14 @@ public final class ShapeEditorScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double scrollX, double scrollY) {
+        if (menu != null) {
+            if (menu.contains(mx, my)) {
+                menu.scroll(scrollY);
+            } else {
+                closeMenu();
+            }
+            return true;
+        }
         if (inPreview(mx, my)) {
             camera.scroll(scrollY);
             return true;
@@ -912,7 +1059,11 @@ public final class ShapeEditorScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        super.render(graphics, mouseX, mouseY, partialTick);
+        // Widgets under an open menu get no hover.
+        boolean overMenu = menu != null && menu.contains(mouseX, mouseY);
+        int mx = overMenu ? -1 : mouseX;
+        int my = overMenu ? -1 : mouseY;
+        super.render(graphics, mx, my, partialTick);
         graphics.drawString(font, title, leftX, 6, 0xFFFFFF);
 
         graphics.enableScissor(leftX, contentTop, leftX + leftW, contentBottom);
@@ -922,7 +1073,7 @@ public final class ShapeEditorScreen extends Screen {
                 graphics.drawString(font, label.text(), leftX, y + 6, TEXT);
             }
         }
-        renderGrid(graphics, mouseX, mouseY);
+        renderGrid(graphics, mx, my);
         graphics.disableScissor();
         if (maxScroll() > 0) {
             int track = contentBottom - contentTop;
@@ -932,8 +1083,18 @@ public final class ShapeEditorScreen extends Screen {
             graphics.fill(leftX + leftW + 3, thumbY, leftX + leftW + 5, thumbY + thumb, 0xC0FFFFFF);
         }
 
-        renderPreview(graphics);
+        renderPreview(graphics, mx, my, partialTick);
         renderSummary(graphics);
+        if (menu != null) {
+            graphics.pose().pushPose();
+            graphics.pose().translate(0.0F, 0.0F, 300.0F);
+            menu.render(graphics, font, mouseX, mouseY);
+            if (presetName != null) {
+                presetName.render(graphics, mouseX, mouseY, partialTick);
+                presetSave.render(graphics, mouseX, mouseY, partialTick);
+            }
+            graphics.pose().popPose();
+        }
     }
 
     private void renderGrid(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -976,7 +1137,7 @@ public final class ShapeEditorScreen extends Screen {
         }
     }
 
-    private void renderPreview(GuiGraphics graphics) {
+    private void renderPreview(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         graphics.fill(previewX0, previewY0, previewX1, previewY1, 0xFF0E1116);
         graphics.renderOutline(previewX0, previewY0, previewX1 - previewX0, previewY1 - previewY0, 0xFF3A3F47);
         GeneratedShape current = evaluation == null ? null : evaluation.shape().orElse(null);
@@ -986,6 +1147,7 @@ public final class ShapeEditorScreen extends Screen {
             preview.render(graphics, font, previewX0 + 1, previewY0 + 1, previewX1 - 1, previewY1 - 1, shown, camera,
                     resultView && stairLike);
         }
+        graphics.enableScissor(previewX0 + 1, previewY0 + 1, previewX1 - 1, previewY1 - 1);
         if (current == null && lastValid != null) {
             graphics.drawString(font, Component.translatable("gui.shapeexcavator.last_valid"), previewX0 + 4,
                     previewY0 + 4, WARN);
@@ -996,6 +1158,12 @@ public final class ShapeEditorScreen extends Screen {
             graphics.drawString(font, Component.translatable("gui.shapeexcavator.preview.selection"), previewX0 + 4,
                     previewY0 + 4, MUTED);
         }
+        graphics.drawString(font, Component.translatable("gui.shapeexcavator.preview.controls"), previewX0 + 4,
+                previewY1 - 11, MUTED);
+        graphics.disableScissor();
+        for (AbstractWidget widget : previewWidgets) {
+            widget.render(graphics, mouseX, mouseY, partialTick);
+        }
     }
 
     private void renderSummary(GuiGraphics graphics) {
@@ -1003,13 +1171,13 @@ public final class ShapeEditorScreen extends Screen {
         GeneratedShape shown = current != null ? current : lastValid;
         if (shown != null) {
             Component line = ShapeTexts.extents(shown).append("    ").append(ShapeTexts.selected(shown));
-            graphics.drawString(font, line, leftX, summaryY, current != null ? TEXT : MUTED);
+            graphics.drawString(font, line, leftX, summaryY + 6, current != null ? TEXT : MUTED);
         }
         Component problem = currentProblem();
         if (problem != null) {
-            graphics.drawString(font, problem, leftX, summaryY + 11, ERROR);
+            graphics.drawString(font, problem, leftX, statusY, ERROR);
         } else if (!status.getString().isEmpty()) {
-            graphics.drawString(font, status, leftX, summaryY + 11, statusColor);
+            graphics.drawString(font, status, leftX, statusY, statusColor);
         }
     }
 

@@ -1,5 +1,8 @@
 package com.byflx.shapeexcavator.client.screen;
 
+import com.byflx.shapeexcavator.preview.LabelPlacement;
+import com.byflx.shapeexcavator.preview.PreviewScale;
+import com.byflx.shapeexcavator.preview.ShapeDiff;
 import com.byflx.shapeexcavator.shape.Cell;
 import com.byflx.shapeexcavator.shape.GeneratedShape;
 import com.byflx.shapeexcavator.shape.ShapeMask;
@@ -8,6 +11,8 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import java.util.Arrays;
+import java.util.Set;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -23,6 +28,10 @@ import org.lwjgl.opengl.GL11;
  * between two selected cells are skipped. Adds a floor grid, labelled width/height/depth axes, the
  * anchor in gold and an arrow pointing from the front into the block.
  *
+ * <p>The block scale stays fixed while the shape changes ({@link PreviewScale}), so a size change
+ * reads as one against the 1-block floor grid; added cells flash green and removed cells red for a
+ * moment. Dimension labels are placed beside the shape, never on it ({@link LabelPlacement}).
+ *
  * <p>Local axes: x = width (right), y = height (up), z = depth (into the block, away from the
  * viewer in the front view). The mesh is cached per shape; camera changes only change the matrix.
  */
@@ -30,11 +39,19 @@ public final class ShapePreviewRenderer {
     private static final int SELECTED = 0x5DA9E9;
     private static final int ANCHOR = 0xF1C232;
     private static final int ENVIRONMENT = 0x8C8C8C;
-    private static final int GRID = 0xFF4A4A4A;
+    private static final int ADDED = 0x55FF55;
+    private static final int REMOVED = 0xFF5555;
+    private static final int GRID = 0xFF3A3A3A;
+    private static final int GRID_FOOTPRINT = 0xFF5A5A5A;
     private static final int AXIS_WIDTH = 0xFFE05050;
     private static final int AXIS_HEIGHT = 0xFF50D050;
     private static final int AXIS_DEPTH = 0xFF5080FF;
     private static final int FORWARD = 0xFFFFFFFF;
+    /** Grid cells drawn beyond the footprint on every side. */
+    private static final int GRID_EXTRA = 2;
+    private static final long HIGHLIGHT_MS = 900L;
+    /** Space at the top of the panel kept free for its caption and icon buttons. */
+    private static final int LABEL_TOP_RESERVE = 14;
     // Brightness per face: -x, +x, -y, +y, -z (front), +z (back).
     private static final float[] SHADE = {0.78F, 0.78F, 0.5F, 1.0F, 0.9F, 0.6F};
 
@@ -43,6 +60,27 @@ public final class ShapePreviewRenderer {
     private float[] vertices = new float[0];
     private int[] colors = new int[0];
     private int quads;
+    /** Pixels per block before the user's zoom; 0 until the first frame or after a reset. */
+    private float baseScale;
+
+    private GeneratedShape highlightShape;
+    private ShapeDiff highlight = ShapeDiff.NONE;
+    private long highlightStart;
+
+    /** Forgets the block scale, so the next frame fits the shape again (double-click reset). */
+    public void resetScale() {
+        baseScale = 0.0F;
+    }
+
+    /**
+     * Flashes the cells a size change added (green) and removed (red) while {@code after} is shown.
+     * The diff is anchor-relative, see {@link ShapeDiff}.
+     */
+    public void highlight(ShapeDiff diff, GeneratedShape after) {
+        highlight = diff;
+        highlightShape = after;
+        highlightStart = Util.getMillis();
+    }
 
     /**
      * @param resultView draw the schematic "what remains" view for stairs instead of the selection
@@ -57,8 +95,8 @@ public final class ShapePreviewRenderer {
         int w = shape.width();
         int h = shape.height();
         int d = shape.depth();
-        float diagonal = (float) Math.sqrt((double) w * w + (double) h * h + (double) d * d) + 3.0F;
-        float scale = Math.min(x1 - x0, y1 - y0) / diagonal * camera.zoom();
+        baseScale = PreviewScale.next(baseScale, x1 - x0, y1 - y0, w, h, d);
+        float scale = baseScale * camera.zoom();
 
         graphics.enableScissor(x0, y0, x1, y1);
         PoseStack pose = graphics.pose();
@@ -73,32 +111,35 @@ public final class ShapePreviewRenderer {
         Matrix4f matrix = new Matrix4f(pose.last().pose());
 
         VertexConsumer consumer = graphics.bufferSource().getBuffer(RenderType.gui());
+        drawGrid(consumer, matrix, w, d);
         for (int q = 0; q < quads; q++) {
             quad(consumer, matrix, vertices, q * 12, colors[q]);
         }
-        drawGrid(consumer, matrix, w, d);
         drawAxes(consumer, matrix, w, h, d);
         if (!resultView) {
             Cell anchor = shape.anchor();
             float ax = anchor.x() + 0.5F;
             float ay = anchor.y() + 0.5F;
             bar(consumer, matrix, ax, ay, anchor.z() - 1.8F, ax, ay, anchor.z(), 0.06F, FORWARD);
+            drawHighlight(consumer, matrix, shape);
         }
         graphics.flush();
         pose.popPose();
         // The labels must stay readable in front of the cubes.
         RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
 
+        LabelPlacement.Rect shapeRect = projectedBox(matrix, w, h, d);
+        LabelPlacement.Rect panel = new LabelPlacement.Rect(x0 + 2, y0 + LABEL_TOP_RESERVE, x1 - 2, y1 - 2);
         label(graphics, font, matrix, w + 0.9F, 0, 0, Component.translatable("gui.shapeexcavator.axis.width", w),
-                AXIS_WIDTH);
+                AXIS_WIDTH, shapeRect, panel);
         label(graphics, font, matrix, 0, h + 0.9F, 0, Component.translatable("gui.shapeexcavator.axis.height", h),
-                AXIS_HEIGHT);
+                AXIS_HEIGHT, shapeRect, panel);
         label(graphics, font, matrix, 0, 0, d + 0.9F, Component.translatable("gui.shapeexcavator.axis.depth", d),
-                AXIS_DEPTH);
+                AXIS_DEPTH, shapeRect, panel);
         if (!resultView) {
             Cell anchor = shape.anchor();
             label(graphics, font, matrix, anchor.x() + 0.5F, anchor.y() + 0.5F, anchor.z() - 2.2F,
-                    Component.translatable("gui.shapeexcavator.axis.front"), FORWARD);
+                    Component.translatable("gui.shapeexcavator.axis.front"), FORWARD, shapeRect, panel);
         }
         graphics.disableScissor();
     }
@@ -176,13 +217,69 @@ public final class ShapePreviewRenderer {
         return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
+    /** Translucent overlays on added cells and ghost cubes for removed ones, fading out. */
+    private void drawHighlight(VertexConsumer consumer, Matrix4f matrix, GeneratedShape shape) {
+        if (highlight.isEmpty() || !shape.equals(highlightShape)) {
+            return;
+        }
+        long elapsed = Util.getMillis() - highlightStart;
+        if (elapsed >= HIGHLIGHT_MS) {
+            highlight = ShapeDiff.NONE;
+            highlightShape = null;
+            return;
+        }
+        float fade = 1.0F - (float) elapsed / HIGHLIGHT_MS;
+        Cell anchor = shape.anchor();
+        overlay(consumer, matrix, highlight.added(), anchor, ADDED, 0.6F * fade, 0.03F);
+        overlay(consumer, matrix, highlight.removed(), anchor, REMOVED, 0.5F * fade, 0.0F);
+    }
+
+    /** Outer faces of the anchor-relative {@code cells}, placed at the shown shape's anchor. */
+    private static void overlay(VertexConsumer consumer, Matrix4f matrix, Set<Cell> cells, Cell anchor, int rgb,
+            float alpha, float grow) {
+        int argb = (Math.round(alpha * 255) << 24) | rgb;
+        for (Cell rel : cells) {
+            int x = rel.x() + anchor.x();
+            int y = rel.y() + anchor.y();
+            int z = rel.z() + anchor.z();
+            float x0 = x - grow;
+            float y0 = y - grow;
+            float z0 = z - grow;
+            float x1 = x + 1 + grow;
+            float y1 = y + 1 + grow;
+            float z1 = z + 1 + grow;
+            if (!cells.contains(new Cell(rel.x() - 1, rel.y(), rel.z()))) {
+                quad(consumer, matrix, new float[] {x0, y0, z0, x0, y1, z0, x0, y1, z1, x0, y0, z1}, argb);
+            }
+            if (!cells.contains(new Cell(rel.x() + 1, rel.y(), rel.z()))) {
+                quad(consumer, matrix, new float[] {x1, y0, z0, x1, y0, z1, x1, y1, z1, x1, y1, z0}, argb);
+            }
+            if (!cells.contains(new Cell(rel.x(), rel.y() - 1, rel.z()))) {
+                quad(consumer, matrix, new float[] {x0, y0, z0, x0, y0, z1, x1, y0, z1, x1, y0, z0}, argb);
+            }
+            if (!cells.contains(new Cell(rel.x(), rel.y() + 1, rel.z()))) {
+                quad(consumer, matrix, new float[] {x0, y1, z0, x1, y1, z0, x1, y1, z1, x0, y1, z1}, argb);
+            }
+            if (!cells.contains(new Cell(rel.x(), rel.y(), rel.z() - 1))) {
+                quad(consumer, matrix, new float[] {x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0}, argb);
+            }
+            if (!cells.contains(new Cell(rel.x(), rel.y(), rel.z() + 1))) {
+                quad(consumer, matrix, new float[] {x0, y0, z1, x0, y1, z1, x1, y1, z1, x1, y0, z1}, argb);
+            }
+        }
+    }
+
+    /** A 1-block floor grid reaching a little beyond the footprint; the footprint lines are brighter. */
     private static void drawGrid(VertexConsumer consumer, Matrix4f matrix, int w, int d) {
         float y = -0.02F;
-        for (int x = 0; x <= w; x++) {
-            bar(consumer, matrix, x, y, 0, x, y, d, 0.025F, GRID);
+        int from = -GRID_EXTRA;
+        for (int x = from; x <= w + GRID_EXTRA; x++) {
+            int color = x >= 0 && x <= w ? GRID_FOOTPRINT : GRID;
+            bar(consumer, matrix, x, y, from, x, y, d + GRID_EXTRA, 0.02F, color);
         }
-        for (int z = 0; z <= d; z++) {
-            bar(consumer, matrix, 0, y, z, w, y, z, 0.025F, GRID);
+        for (int z = from; z <= d + GRID_EXTRA; z++) {
+            int color = z >= 0 && z <= d ? GRID_FOOTPRINT : GRID;
+            bar(consumer, matrix, from, y, z, w + GRID_EXTRA, y, z, 0.02F, color);
         }
     }
 
@@ -228,10 +325,29 @@ public final class ShapePreviewRenderer {
         }
     }
 
+    /** The screen rectangle covered by the shape's bounding box. */
+    private static LabelPlacement.Rect projectedBox(Matrix4f matrix, int w, int h, int d) {
+        float minX = Float.MAX_VALUE;
+        float minY = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE;
+        float maxY = -Float.MAX_VALUE;
+        Vector3f p = new Vector3f();
+        for (int corner = 0; corner < 8; corner++) {
+            matrix.transformPosition((corner & 1) * w, ((corner >> 1) & 1) * h, ((corner >> 2) & 1) * d, p);
+            minX = Math.min(minX, p.x());
+            minY = Math.min(minY, p.y());
+            maxX = Math.max(maxX, p.x());
+            maxY = Math.max(maxY, p.y());
+        }
+        return new LabelPlacement.Rect((int) Math.floor(minX), (int) Math.floor(minY), (int) Math.ceil(maxX),
+                (int) Math.ceil(maxY));
+    }
+
     private static void label(GuiGraphics graphics, Font font, Matrix4f matrix, float x, float y, float z,
-            Component text, int color) {
+            Component text, int color, LabelPlacement.Rect shapeRect, LabelPlacement.Rect panel) {
         Vector3f screen = matrix.transformPosition(x, y, z, new Vector3f());
-        graphics.drawString(font, text, Math.round(screen.x()) - font.width(text) / 2, Math.round(screen.y()) - 4,
-                color);
+        LabelPlacement.Rect at = LabelPlacement.place(Math.round(screen.x()), Math.round(screen.y()),
+                font.width(text), font.lineHeight, shapeRect, panel);
+        graphics.drawString(font, text, at.x0(), at.y0() + 1, color);
     }
 }

@@ -165,6 +165,21 @@ class EditorDraftTest {
     }
 
     @Test
+    void convertingCanBeUndoneToThePreviousCustomShape() {
+        EditorDraft draft = EditorDraft.defaults();
+        draft.setType(ShapeType.CUSTOM);
+        draft.custom().set(1, 1, 0, true);
+        draft.setType(ShapeType.CUBOID);
+        draft.setText(EditorDraft.WIDTH, "5");
+        assertTrue(draft.convertToCustom(ShapeLimits.DEFAULT));
+        assertEquals(15, draft.custom().count());
+        assertTrue(draft.custom().undo());
+        assertEquals(1, draft.custom().count());
+        assertEquals(3, draft.custom().width());
+        assertTrue(draft.custom().get(1, 1, 0));
+    }
+
+    @Test
     void customSizeFieldsRequestResizeInsteadOfApplyingIt() {
         EditorDraft draft = EditorDraft.defaults();
         draft.setType(ShapeType.CUSTOM);

@@ -216,6 +216,20 @@ public final class CustomMaskDraft {
         return true;
     }
 
+    /**
+     * Replaces the whole grid and anchor with {@code mask} as one undoable step, e.g. when a template
+     * becomes the custom shape. Undo brings the previous grid back.
+     */
+    public void replaceWith(ShapeMask mask) {
+        Objects.requireNonNull(mask, "mask");
+        pushUndo();
+        width = mask.width();
+        height = mask.height();
+        depth = mask.depth();
+        bits = mask.toBitSet();
+        anchor = mask.anchor();
+    }
+
     public boolean canUndo() {
         return !undo.isEmpty();
     }

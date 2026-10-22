@@ -113,6 +113,21 @@ class CustomMaskDraftTest {
     }
 
     @Test
+    void replacingTheGridIsOneUndoStep() {
+        CustomMaskDraft draft = CustomMaskDraft.empty(2, 2, 1);
+        draft.set(0, 0, 0, true);
+        ShapeMask template = ShapeMask.full(4, 3, 2, new Cell(1, 1, 0));
+        draft.replaceWith(template);
+        assertEquals(template, draft.toMask());
+        assertTrue(draft.undo());
+        assertEquals(2, draft.width());
+        assertEquals(1, draft.count());
+        assertTrue(draft.get(0, 0, 0));
+        assertTrue(draft.redo());
+        assertEquals(template, draft.toMask());
+    }
+
+    @Test
     void toMaskIsAnIndependentCopy() {
         CustomMaskDraft draft = CustomMaskDraft.empty(2, 1, 1);
         draft.set(0, 0, 0, true);
