@@ -85,6 +85,64 @@ class LabelPlacementTest {
         }
     }
 
+    @Test
+    void frontViewLabelsNeverOverlapEachOther() {
+        // Straight front view in a 320×240 GUI: the depth axis end and the "Front" arrow both project
+        // onto the shape and want the free spot below it. Texts as in en_us/de_de.
+        String[][] texts = {
+                {"Width %s", "Height %s", "Depth %s", "Front → into the block"},
+                {"Breite %s", "Höhe %s", "Tiefe %s", "Vorne → in den Block"}};
+        int cx = 240;
+        int cy = 101;
+        for (String[] language : texts) {
+            for (int w = 1; w <= 6; w++) {
+                for (int scale = 4; scale <= 60; scale++) {
+                    int h = 3;
+                    int d = 1;
+                    Rect shape = new Rect((int) Math.floor(cx - scale * w / 2.0), (int) Math.floor(cy - scale * h / 2.0),
+                            (int) Math.ceil(cx + scale * w / 2.0), (int) Math.ceil(cy + scale * h / 2.0));
+                    float anchorX = (w - 1) / 2 + 0.5F;
+                    List<Label> labels = List.of(
+                            label(language[0], w, cx + scale * (w + 0.9F - w / 2.0F), cy + scale * h / 2.0F),
+                            label(language[1], h, cx - scale * w / 2.0F, cy - scale * (h + 0.9F - h / 2.0F)),
+                            label(language[2], d, cx - scale * w / 2.0F, cy + scale * h / 2.0F),
+                            label(language[3], 0, cx + scale * (anchorX - w / 2.0F), cy - scale * (1.5F - h / 2.0F)));
+                    assertCalm(LabelPlacement.layout(labels, shape, SMALL_PANEL), shape, SMALL_PANEL);
+                }
+            }
+        }
+    }
+
+    @Test
+    void laterLabelMovesNextToAnEarlierOne() {
+        Rect first = new Rect(80, 112, 120, 121);
+        Rect label = LabelPlacement.place(100, 116, 40, 9, SHAPE, PANEL, List.of(first)).orElseThrow();
+        assertFalse(label.intersects(first), label.toString());
+        assertFalse(label.intersects(SHAPE), label.toString());
+        assertTrue(label.inside(PANEL), label.toString());
+    }
+
+    private static Label label(String format, int value, float x, float y) {
+        String text = format.replace("%s", Integer.toString(value));
+        return new Label(Math.round(x), Math.round(y), width(text), 9);
+    }
+
+    /** Advance widths of the vanilla default font; glyphs outside ASCII are counted generously. */
+    private static int width(String text) {
+        int width = 0;
+        for (char c : text.toCharArray()) {
+            width += switch (c) {
+                case ' ' -> 4;
+                case 'i', '!', '.', ',', ':', ';', '|', '\'' -> 2;
+                case 'l', '`' -> 3;
+                case 't', 'I', '[', ']', '"' -> 4;
+                case 'f', 'k', '<', '>', '(', ')', '{', '}', '*' -> 5;
+                default -> c < 128 || Character.isLetter(c) ? 6 : 8;
+            };
+        }
+        return width;
+    }
+
     /** Width, height and depth labels at the given anchors, plus a short "Front" label at the centre. */
     private static List<Label> labels(int wx, int wy, int hx, int hy, int dx, int dy) {
         return List.of(new Label(wx, wy, 40, 9), new Label(hx, hy, 45, 9), new Label(dx, dy, 40, 9),
@@ -101,10 +159,8 @@ class LabelPlacementTest {
                 assertFalse(label.intersects(drawn), label + " covers " + drawn);
             }
             assertTrue(label.inside(panel), label + " outside " + panel);
-            if (layout.clipsShape()) {
-                for (int j = i + 1; j < rects.size(); j++) {
-                    assertFalse(label.intersects(rects.get(j)), label + " overlaps " + rects.get(j));
-                }
+            for (int j = i + 1; j < rects.size(); j++) {
+                assertFalse(label.intersects(rects.get(j)), label + " overlaps " + rects.get(j));
             }
         }
     }

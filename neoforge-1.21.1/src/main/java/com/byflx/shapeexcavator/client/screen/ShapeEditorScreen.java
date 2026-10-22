@@ -41,6 +41,7 @@ import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -128,6 +129,8 @@ public final class ShapeEditorScreen extends Screen {
     private int previewY1;
     private int statusY;
     private int summaryY;
+    /** The summary ends left of this x, where the world preview checkbox starts. */
+    private int summaryMaxX;
     private int actionY;
     private int gridBaseY = -1;
     private int cellSize;
@@ -410,6 +413,7 @@ public final class ShapeEditorScreen extends Screen {
                 .build();
         checkbox.setX(width - MARGIN - checkbox.getWidth());
         addRenderableWidget(checkbox);
+        summaryMaxX = checkbox.getX() - 6;
 
         int gap = 2;
         int w = Mth.clamp((width - 2 * MARGIN - gap) / 4, 60, 100);
@@ -1171,8 +1175,18 @@ public final class ShapeEditorScreen extends Screen {
         GeneratedShape current = evaluation == null ? null : evaluation.shape().orElse(null);
         GeneratedShape shown = current != null ? current : lastValid;
         if (shown != null) {
-            Component line = ShapeTexts.extents(shown).append("    ").append(ShapeTexts.selected(shown));
-            graphics.drawString(font, line, leftX, summaryY + 6, current != null ? TEXT : MUTED);
+            // The summary shares its row with the world preview checkbox: keep left of it, wrap if needed.
+            int maxWidth = Math.max(20, summaryMaxX - leftX);
+            int color = current != null ? TEXT : MUTED;
+            Component extents = ShapeTexts.extents(shown);
+            Component selected = ShapeTexts.selected(shown);
+            Component line = extents.copy().append("    ").append(selected);
+            if (font.width(line) <= maxWidth) {
+                graphics.drawString(font, line, leftX, summaryY + 6, color);
+            } else {
+                graphics.drawString(font, firstLine(extents, maxWidth), leftX, summaryY + 1, color);
+                graphics.drawString(font, firstLine(selected, maxWidth), leftX, summaryY + 11, color);
+            }
         }
         Component problem = currentProblem();
         if (problem != null) {
@@ -1180,6 +1194,11 @@ public final class ShapeEditorScreen extends Screen {
         } else if (!status.getString().isEmpty()) {
             graphics.drawString(font, status, leftX, statusY, statusColor);
         }
+    }
+
+    private FormattedCharSequence firstLine(Component text, int maxWidth) {
+        List<FormattedCharSequence> lines = font.split(text, maxWidth);
+        return lines.isEmpty() ? FormattedCharSequence.EMPTY : lines.get(0);
     }
 
     private Component currentProblem() {

@@ -1,13 +1,16 @@
 package com.byflx.shapeexcavator.preview;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Places the dimension labels of the editor preview next to their axis ends, but never on top of
  * the shape: a label whose wanted spot overlaps the shape's screen rectangle moves to the nearest
- * free side of it. When the shape leaves no free side (zoomed in, small panel), all labels go into a
+ * free side of it, and labels never overlap each other (a later label moves next to an earlier one
+ * in its way). When the shape leaves no free spot (zoomed in, small panel), all labels go into a
  * strip at the bottom of the panel and the shape is clipped above that strip, so the labels still
  * never cover it.
  */
@@ -47,11 +50,15 @@ public final class LabelPlacement {
     private LabelPlacement() {
     }
 
-    /** Places every label beside the shape or, if one has no free spot, all of them in the bottom strip. */
+    /**
+     * Places every label beside the shape and clear of the labels placed before it or, if one has no
+     * free spot, all of them in the bottom strip.
+     */
     public static Layout layout(List<Label> labels, Rect shape, Rect panel) {
         List<Rect> placed = new ArrayList<>(labels.size());
         for (Label label : labels) {
-            Optional<Rect> rect = place(label.anchorX(), label.anchorY(), label.width(), label.height(), shape, panel);
+            Optional<Rect> rect = place(label.anchorX(), label.anchorY(), label.width(), label.height(), shape, panel,
+                    placed);
             if (rect.isEmpty()) {
                 return strip(labels, panel);
             }
@@ -60,28 +67,59 @@ public final class LabelPlacement {
         return new Layout(List.copyOf(placed), Integer.MAX_VALUE);
     }
 
+    /** {@link #place(int, int, int, int, Rect, Rect, List)} with no other labels in the way. */
+    public static Optional<Rect> place(int anchorX, int anchorY, int width, int height, Rect shape, Rect panel) {
+        return place(anchorX, anchorY, width, height, shape, panel, List.of());
+    }
+
     /**
      * @param anchorX the projected axis end the label belongs to
      * @param width   label width
      * @param height  label height
-     * @return the label rectangle, or empty if no spot inside the panel avoids the shape
+     * @param taken   labels already placed; the result keeps a gap to each of them
+     * @return the label rectangle, or empty if no spot inside the panel avoids the shape and the
+     *         other labels
      */
-    public static Optional<Rect> place(int anchorX, int anchorY, int width, int height, Rect shape, Rect panel) {
+    public static Optional<Rect> place(int anchorX, int anchorY, int width, int height, Rect shape, Rect panel,
+            List<Rect> taken) {
         Rect blocked = shape.inflate(GAP);
         Rect wanted = clamp(new Rect(anchorX - width / 2, anchorY - height / 2, anchorX - width / 2 + width,
                 anchorY - height / 2 + height), panel);
-        if (!wanted.intersects(blocked) && wanted.inside(panel)) {
+        if (free(wanted, blocked, panel, taken)) {
             return Optional.of(wanted);
         }
-        List<Rect> candidates = List.of(
+        Set<Rect> candidates = new LinkedHashSet<>(List.of(
+                wanted,
                 clamp(at(blocked.x1, wanted.y0, width, height), panel, false, true),
                 clamp(at(blocked.x0 - width, wanted.y0, width, height), panel, false, true),
                 clamp(at(wanted.x0, blocked.y0 - height, width, height), panel, true, false),
-                clamp(at(wanted.x0, blocked.y1, width, height), panel, true, false));
+                clamp(at(wanted.x0, blocked.y1, width, height), panel, true, false)));
+        // A spot taken by another label: try right next to that label, once per label in the way.
+        List<Rect> frontier = new ArrayList<>(candidates);
+        for (int round = 0; round < taken.size() && !frontier.isEmpty(); round++) {
+            List<Rect> next = new ArrayList<>();
+            for (Rect candidate : frontier) {
+                for (Rect other : taken) {
+                    if (!candidate.intersects(other.inflate(GAP))) {
+                        continue;
+                    }
+                    next.add(clamp(at(candidate.x0, other.y1 + GAP, width, height), panel, true, false));
+                    next.add(clamp(at(candidate.x0, other.y0 - GAP - height, width, height), panel, true, false));
+                    next.add(clamp(at(other.x1 + 2 * GAP, candidate.y0, width, height), panel, false, true));
+                    next.add(clamp(at(other.x0 - 2 * GAP - width, candidate.y0, width, height), panel, false, true));
+                }
+            }
+            frontier = new ArrayList<>();
+            for (Rect rect : next) {
+                if (candidates.add(rect)) {
+                    frontier.add(rect);
+                }
+            }
+        }
         Rect best = null;
         long bestDistance = Long.MAX_VALUE;
         for (Rect candidate : candidates) {
-            if (candidate.intersects(blocked) || !candidate.inside(panel)) {
+            if (!free(candidate, blocked, panel, taken)) {
                 continue;
             }
             long dx = candidate.x0 - wanted.x0;
@@ -93,6 +131,18 @@ public final class LabelPlacement {
             }
         }
         return Optional.ofNullable(best);
+    }
+
+    private static boolean free(Rect candidate, Rect blocked, Rect panel, List<Rect> taken) {
+        if (candidate.intersects(blocked) || !candidate.inside(panel)) {
+            return false;
+        }
+        for (Rect other : taken) {
+            if (candidate.intersects(other.inflate(GAP))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** All labels in rows at the bottom of the panel, left to right; the shape is clipped above them. */
