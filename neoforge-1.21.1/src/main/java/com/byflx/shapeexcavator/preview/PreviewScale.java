@@ -14,17 +14,28 @@ public final class PreviewScale {
     private PreviewScale() {
     }
 
-    /** The largest scale at which the shape fits the panel from every camera angle. */
+    /** The scale at which the shape fits the panel from every camera angle, with a margin around it. */
     public static float fit(int panelWidth, int panelHeight, int width, int height, int depth) {
-        double diagonal = Math.sqrt((double) width * width + (double) height * height + (double) depth * depth);
-        return (float) (Math.max(1, Math.min(panelWidth, panelHeight)) / (diagonal + MARGIN_BLOCKS));
+        return (float) (panelSize(panelWidth, panelHeight) / (diagonal(width, height, depth) + MARGIN_BLOCKS));
+    }
+
+    /**
+     * Whether the shape, centred in the panel, is fully visible from every camera angle at
+     * {@code displayed} pixels per block. Its projection never reaches further than half the
+     * diagonal from the centre. No margin here: the margin only applies when the scale is re-fitted.
+     */
+    public static boolean fits(float displayed, int panelWidth, int panelHeight, int width, int height, int depth) {
+        return diagonal(width, height, depth) * displayed <= panelSize(panelWidth, panelHeight);
     }
 
     public static float initial(int panelWidth, int panelHeight, int width, int height, int depth) {
         return Math.min(fit(panelWidth, panelHeight, width, height, depth), MAX_BLOCK_PX);
     }
 
-    /** Keeps {@code current} while the shape fits; otherwise the scale at which it fits again. */
+    /**
+     * Keeps {@code current} while the shape {@link #fits}; otherwise the scale at which it fits again
+     * with the margin of {@link #fit}.
+     */
     public static float next(float current, int panelWidth, int panelHeight, int width, int height, int depth) {
         return next(current, 1.0F, panelWidth, panelHeight, width, height, depth);
     }
@@ -40,6 +51,17 @@ public final class PreviewScale {
             return initial(panelWidth, panelHeight, width, height, depth);
         }
         float userZoomOut = zoom > 0.0F ? Math.min(zoom, 1.0F) : 1.0F;
+        if (fits(current * userZoomOut, panelWidth, panelHeight, width, height, depth)) {
+            return current;
+        }
         return Math.min(current, fit(panelWidth, panelHeight, width, height, depth) / userZoomOut);
+    }
+
+    private static double diagonal(int width, int height, int depth) {
+        return Math.sqrt((double) width * width + (double) height * height + (double) depth * depth);
+    }
+
+    private static int panelSize(int panelWidth, int panelHeight) {
+        return Math.max(1, Math.min(panelWidth, panelHeight));
     }
 }

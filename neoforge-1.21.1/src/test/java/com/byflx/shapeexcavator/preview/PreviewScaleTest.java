@@ -1,6 +1,7 @@
 package com.byflx.shapeexcavator.preview;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,29 @@ class PreviewScaleTest {
         float scale = PreviewScale.initial(W, H, 3, 3, 1);
         assertEquals(scale, PreviewScale.next(scale, W, H, 4, 3, 1));
         assertEquals(scale, PreviewScale.next(scale, W, H, 5, 3, 1));
+    }
+
+    @Test
+    void growingThatStillFitsKeepsTheScaleBelowTheCap() {
+        // 146 × 100 scene: 3×3×1 opens at about 13.59 px, below the cap.
+        float scale = PreviewScale.initial(146, 100, 3, 3, 1);
+        assertTrue(scale < PreviewScale.MAX_BLOCK_PX);
+        // At that scale 4×3×1 spans about 69 px of 100, so nothing re-zooms.
+        assertTrue(PreviewScale.fit(146, 100, 4, 3, 1) < scale);
+        assertEquals(scale, PreviewScale.next(scale, 146, 100, 4, 3, 1));
+        assertEquals(scale, PreviewScale.next(scale, 146, 100, 6, 3, 1));
+    }
+
+    @Test
+    void refitHappensOnlyOnceTheShapeNoLongerFits() {
+        float scale = PreviewScale.initial(146, 100, 3, 3, 1);
+        // 6×3×1 spans about 92 px and still fits; 7×3×1 spans about 104 px and does not.
+        assertTrue(PreviewScale.fits(scale, 146, 100, 6, 3, 1));
+        assertFalse(PreviewScale.fits(scale, 146, 100, 7, 3, 1));
+        float refit = PreviewScale.next(scale, 146, 100, 7, 3, 1);
+        assertEquals(PreviewScale.fit(146, 100, 7, 3, 1), refit);
+        assertTrue(PreviewScale.fits(refit, 146, 100, 7, 3, 1));
+        assertEquals(refit, PreviewScale.next(refit, 146, 100, 8, 3, 1));
     }
 
     @Test
