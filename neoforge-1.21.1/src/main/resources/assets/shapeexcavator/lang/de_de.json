@@ -84,6 +84,8 @@
   "gui.shapeexcavator.title": "Formbagger",
   "gui.shapeexcavator.shape": "Form",
   "gui.shapeexcavator.status.connecting": "Verbinde mit dem Server …",
+  "gui.shapeexcavator.status.retrying": "Noch keine Antwort – frage den Server erneut (%1$s/%2$s) …",
+  "gui.shapeexcavator.status.no_reply": "Der Server hat nicht geantwortet – Editor schließen und neu öffnen",
   "gui.shapeexcavator.status.damaged": "Die gespeicherte Form war unlesbar – Standard wird angezeigt",
   "gui.shapeexcavator.status.applying": "Warte auf den Server …",
   "gui.shapeexcavator.status.applied_newer_unsaved": "Frühere Fassung übernommen – deine späteren Änderungen sind noch nicht übernommen",

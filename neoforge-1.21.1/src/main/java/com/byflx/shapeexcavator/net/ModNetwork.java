@@ -18,7 +18,8 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
  * client-bound payload arrives, so a dedicated server never loads client classes.
  */
 public final class ModNetwork {
-    private static final String VERSION = "1";
+    /** "2": begin requests and session replies carry a request id. */
+    private static final String VERSION = "2";
 
     private ModNetwork() {
     }
@@ -39,7 +40,7 @@ public final class ModNetwork {
     private static void onBeginEdit(BeginEditPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (context.player() instanceof ServerPlayer player) {
-                EditSessions.begin(player, payload.slot());
+                EditSessions.begin(player, payload.requestId(), payload.slot());
             }
         });
     }

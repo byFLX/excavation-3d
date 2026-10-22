@@ -41,8 +41,9 @@ public final class EditSessions {
     private EditSessions() {
     }
 
-    static void begin(ServerPlayer player, int slot) {
-        // Flooding is dropped before any session, tool data or reply is created.
+    static void begin(ServerPlayer player, int requestId, int slot) {
+        // Flooding is dropped before any session, tool data or reply is created; the client asks
+        // again after SessionHandshake.RETRY_TICKS, which is longer than the window.
         if (!BEGINS.tryAcquire(player.getUUID(), player.server.getTickCount())) {
             return;
         }
@@ -50,7 +51,7 @@ public final class EditSessions {
         ItemStack stack = toolInSelectedSlot(player, slot);
         if (stack == null) {
             SESSIONS.remove(player.getUUID());
-            PacketDistributor.sendToPlayer(player, new EditSessionPayload(0, false, 0L, limits.maxAxis(),
+            PacketDistributor.sendToPlayer(player, new EditSessionPayload(requestId, 0, false, 0L, limits.maxAxis(),
                     limits.maxSelected(), reason("not_holding_tool")));
             return;
         }
@@ -61,7 +62,7 @@ public final class EditSessions {
         }
         int id = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
         SESSIONS.put(player.getUUID(), new Session(id, slot, data.toolId()));
-        PacketDistributor.sendToPlayer(player, new EditSessionPayload(id, true, data.revision(), limits.maxAxis(),
+        PacketDistributor.sendToPlayer(player, new EditSessionPayload(requestId, id, true, data.revision(), limits.maxAxis(),
                 limits.maxSelected(), Component.empty()));
     }
 

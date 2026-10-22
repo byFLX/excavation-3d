@@ -6,6 +6,7 @@ import com.byflx.shapeexcavator.data.ToolShapeData;
 import com.byflx.shapeexcavator.editor.CustomMaskDraft;
 import com.byflx.shapeexcavator.editor.DraftSaveState;
 import com.byflx.shapeexcavator.editor.EditorDraft;
+import com.byflx.shapeexcavator.editor.SessionHandshake;
 import com.byflx.shapeexcavator.net.ApplyResultPayload;
 import com.byflx.shapeexcavator.net.ApplyShapePayload;
 import com.byflx.shapeexcavator.net.BeginEditPayload;
@@ -73,8 +74,7 @@ public final class ShapeEditorScreen extends Screen {
     private final PreviewCamera camera = new PreviewCamera();
     private final ShapePreviewRenderer preview = new ShapePreviewRenderer();
 
-    private boolean sessionRequested;
-    private int sessionId;
+    private final SessionHandshake handshake = new SessionHandshake();
     private long revision;
     private boolean awaitingReply;
     private boolean closeAfterApply;
@@ -153,9 +153,8 @@ public final class ShapeEditorScreen extends Screen {
         resizeCancelButton = null;
         gridBaseY = -1;
         layout();
-        if (!sessionRequested) {
-            sessionRequested = true;
-            PacketDistributor.sendToServer(new BeginEditPayload(slot));
+        if (handshake.state() == SessionHandshake.State.IDLE) {
+            PacketDistributor.sendToServer(new BeginEditPayload(handshake.start(), slot));
         }
 
         int y = contentTop;
@@ -607,7 +606,7 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private boolean canApply() {
-        return sessionId != 0 && !awaitingReply && pendingResize == null && evaluation != null && evaluation.isValid();
+        return handshake.sessionId() != 0 && !awaitingReply && pendingResize == null && evaluation != null && evaluation.isValid();
     }
 
     // ---------------------------------------------------------------- presets
@@ -683,27 +682,43 @@ public final class ShapeEditorScreen extends Screen {
             }
         }
         setStatus(Component.translatable("gui.shapeexcavator.status.applying"), MUTED);
-        PacketDistributor.sendToServer(new ApplyShapePayload(sessionId, slot, revision, evaluation.config(),
-                worldPreview));
+        PacketDistributor.sendToServer(new ApplyShapePayload(handshake.sessionId(), slot, revision,
+                evaluation.config(), worldPreview));
         refresh();
     }
 
+    @Override
+    public void tick() {
+        super.tick();
+        // Only runs while this screen is shown; behind the discard dialog the wait pauses.
+        int retry = handshake.tick();
+        if (retry != 0) {
+            setStatus(Component.translatable("gui.shapeexcavator.status.retrying", handshake.attempts(),
+                    SessionHandshake.MAX_ATTEMPTS), MUTED);
+            PacketDistributor.sendToServer(new BeginEditPayload(retry, slot));
+        } else if (handshake.state() == SessionHandshake.State.NO_REPLY && statusColor != ERROR) {
+            setStatus(Component.translatable("gui.shapeexcavator.status.no_reply"), ERROR);
+        }
+    }
+
     public void onSession(EditSessionPayload payload) {
-        if (payload.ok()) {
-            sessionId = payload.sessionId();
+        // Replies to an earlier attempt or to an editor that was closed meanwhile are ignored.
+        if (!handshake.onReply(payload.requestId(), payload.ok(), payload.sessionId())) {
+            return;
+        }
+        if (handshake.state() == SessionHandshake.State.OPEN) {
             revision = payload.revision();
-            if (statusColor == MUTED) {
+            if (statusColor == MUTED || handshake.attempts() > 1) {
                 setStatus(Component.empty(), MUTED);
             }
         } else {
-            sessionId = 0;
             setStatus(payload.message(), ERROR);
         }
         refresh();
     }
 
     public void onApplyResult(ApplyResultPayload payload) {
-        if (payload.sessionId() != sessionId) {
+        if (!awaitingReply || payload.sessionId() != handshake.sessionId()) {
             return;
         }
         awaitingReply = false;

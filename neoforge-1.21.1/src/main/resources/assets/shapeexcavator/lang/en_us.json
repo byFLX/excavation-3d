@@ -84,6 +84,8 @@
   "gui.shapeexcavator.title": "Shape Excavator",
   "gui.shapeexcavator.shape": "Shape",
   "gui.shapeexcavator.status.connecting": "Connecting to the server…",
+  "gui.shapeexcavator.status.retrying": "No answer yet - asking the server again (%1$s/%2$s)…",
+  "gui.shapeexcavator.status.no_reply": "The server did not answer - close and reopen the editor",
   "gui.shapeexcavator.status.damaged": "The stored shape could not be read - showing the default",
   "gui.shapeexcavator.status.applying": "Waiting for the server…",
   "gui.shapeexcavator.status.applied_newer_unsaved": "Earlier version applied - your later changes are not applied yet",
