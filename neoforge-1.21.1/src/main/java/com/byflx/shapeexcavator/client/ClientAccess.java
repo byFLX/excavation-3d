@@ -13,6 +13,7 @@ public final class ClientAccess {
     public static boolean openEditor() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null || minecraft.screen != null
+                || QuickShapeAction.busy()
                 || !minecraft.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) {
             return false;
         }

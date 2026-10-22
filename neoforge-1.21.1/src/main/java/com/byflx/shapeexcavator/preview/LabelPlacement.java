@@ -50,6 +50,35 @@ public final class LabelPlacement {
     private LabelPlacement() {
     }
 
+    /** Labels near projected edge midpoints, with leaders drawn by the caller. Never form a strip. */
+    public static Layout edges(List<Label> labels, Rect panel) {
+        int edgeGap = 6;
+        List<Rect> placed = new ArrayList<>();
+        for (Label label : labels) {
+            Rect wanted = clamp(at(label.anchorX() - label.width() / 2,
+                    label.anchorY() - label.height() / 2, label.width(), label.height()), panel);
+            Rect best = wanted;
+            long distance = Long.MAX_VALUE;
+            // Search nearby rows and both ends of existing labels, preserving the edge association.
+            for (int y = panel.y0; y + label.height() <= panel.y1; y++) {
+                List<Integer> xs = new ArrayList<>(List.of(wanted.x0));
+                for (Rect other : placed) {
+                    xs.add(other.x0 - label.width() - 2 * edgeGap);
+                    xs.add(other.x1 + 2 * edgeGap);
+                }
+                for (int x : xs) {
+                    Rect candidate = at(x, y, label.width(), label.height());
+                    if (!candidate.inside(panel) || placed.stream().anyMatch(r -> candidate.intersects(r.inflate(edgeGap)))) continue;
+                    long dx = x - wanted.x0, dy = y - wanted.y0;
+                    long cost = dx * dx + dy * dy;
+                    if (cost < distance) { best = candidate; distance = cost; }
+                }
+            }
+            placed.add(best);
+        }
+        return new Layout(List.copyOf(placed), Integer.MAX_VALUE);
+    }
+
     /**
      * Places every label beside the shape and clear of the labels placed before it or, if one has no
      * free spot, all of them in the bottom strip.

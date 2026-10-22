@@ -20,9 +20,8 @@ public final class ModTags {
     }
 
     /**
-     * The shape an eligible tool carries, also an unreadable one; null for every other stack. Hints
-     * (tooltip, HUD, world preview) only appear when this is non-null, so tools without a shape
-     * look like vanilla.
+     * The shape an eligible tool carries, also an unreadable one; null for every other stack.
+     * World preview needs a shape; the tooltip/HUD also show Off on eligible unconfigured tools.
      */
     public static ToolShapeData shapeOf(ItemStack stack) {
         if (!stack.is(SHAPE_TOOLS)) {

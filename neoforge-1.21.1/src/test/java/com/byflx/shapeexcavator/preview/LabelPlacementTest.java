@@ -11,6 +11,24 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class LabelPlacementTest {
+    @Test
+    void edgeMidpointsKeepSeparateLabelsWithoutAFallbackStrip() {
+        Rect panel = new Rect(170, 40, 311, 160);
+        for (int y = 50; y < 220; y += 17) {
+            var labels = List.of(new Label(240, y, 42, 9), new Label(190, y - 40, 54, 9),
+                    new Label(235, y, 42, 9));
+            var layout = LabelPlacement.edges(labels, panel);
+            assertFalse(layout.clipsShape());
+            for (int i = 0; i < 3; i++) {
+                assertTrue(layout.labels().get(i).inside(panel));
+                for (int j = 0; j < i; j++) {
+                    assertFalse(layout.labels().get(i).intersects(layout.labels().get(j).inflate(6)));
+                }
+            }
+        }
+        var layout = LabelPlacement.edges(List.of(new Label(240, 100, 42, 9)), panel);
+        assertEquals(new Rect(219, 96, 261, 105), layout.labels().getFirst());
+    }
     private static final Rect PANEL = new Rect(0, 0, 200, 150);
     private static final Rect SHAPE = new Rect(60, 40, 140, 110);
     /** The label panel of the editor preview at a 320×240 GUI size. */

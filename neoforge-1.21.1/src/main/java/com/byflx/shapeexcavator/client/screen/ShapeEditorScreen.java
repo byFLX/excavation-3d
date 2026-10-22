@@ -13,6 +13,8 @@ import com.byflx.shapeexcavator.net.BeginEditPayload;
 import com.byflx.shapeexcavator.net.EditSessionPayload;
 import com.byflx.shapeexcavator.net.RemoveShapePayload;
 import com.byflx.shapeexcavator.preview.ShapeDiff;
+import com.byflx.shapeexcavator.preview.CustomCanvas;
+import com.byflx.shapeexcavator.preview.PreviewPicking;
 import com.byflx.shapeexcavator.registry.ModComponents;
 import com.byflx.shapeexcavator.shape.Cell;
 import com.byflx.shapeexcavator.shape.GeneratedShape;
@@ -95,6 +97,7 @@ public final class ShapeEditorScreen extends Screen {
     private boolean resultView;
     private EditorDraft.Evaluation evaluation;
     private GeneratedShape lastValid;
+    private GeneratedShape customShown;
     /** Set by size edits; the next refresh flashes the added and removed cells. */
     private boolean sizeEdited;
     private final PreviewCamera camera = new PreviewCamera();
@@ -115,6 +118,9 @@ public final class ShapeEditorScreen extends Screen {
     private CustomMaskDraft.ResizeCheck pendingResize;
     private Boolean paintValue;
     private boolean draggingCamera;
+    private int previewButton = -1;
+    private double previewPressX, previewPressY;
+    private boolean closeAfterApply;
     private String presetCursor = "";
 
     private int leftX;
@@ -431,7 +437,8 @@ public final class ShapeEditorScreen extends Screen {
             lines = Math.max(lines, font.split(caption, captionWidth).size());
         }
         sceneY0 = Math.max(previewY0 + 2 + ICON_SIZE + 2, captionY + lines * font.lineHeight + 2);
-        int hintLines = Math.max(1, font.split(Component.translatable("gui.shapeexcavator.preview.controls"),
+        int hintLines = Math.max(1, font.split(Component.translatable(draft.type() == ShapeType.CUSTOM
+                ? "gui.shapeexcavator.preview.custom_controls" : "gui.shapeexcavator.preview.controls"),
                 fullWidth).size());
         hintY = previewY1 - 2 - hintLines * font.lineHeight;
         // On a tiny panel the scene keeps a minimum height rather than vanishing.
@@ -668,13 +675,14 @@ public final class ShapeEditorScreen extends Screen {
 
     private void handleCustomResize() {
         pendingResize = null;
+        // Resize errors are derived from the current request, never left over from an earlier shrink.
+        setStatus(Component.empty(), MUTED);
         Optional<CustomMaskDraft.ResizeCheck> request = draft.requestedCustomResize(limits());
         if (request.isEmpty()) {
             return;
         }
         CustomMaskDraft.ResizeCheck check = request.get();
         if (!check.anchorInside()) {
-            setStatus(Component.translatable("gui.shapeexcavator.resize.anchor_outside"), ERROR);
             return;
         }
         if (check.lostCells() > 0) {
@@ -719,6 +727,8 @@ public final class ShapeEditorScreen extends Screen {
 
     private void customEdited(boolean changedSomething) {
         if (changedSomething) {
+            // Painting or moving the anchor can change what a pending shrink would lose.
+            handleCustomResize();
             changed();
         }
     }
@@ -766,6 +776,8 @@ public final class ShapeEditorScreen extends Screen {
     private void refresh() {
         GeneratedShape before = lastValid;
         evaluation = draft.evaluate(limits());
+        customShown = draft.type() == ShapeType.CUSTOM
+                ? new GeneratedShape(draft.transform().apply(draft.custom().toMask())) : null;
         Optional<GeneratedShape> shape = evaluation.shape();
         if (sizeEdited && before != null && shape.isPresent() && !shape.get().equals(before)) {
             preview.highlight(ShapeDiff.between(before, shape.get()), shape.get());
@@ -879,6 +891,12 @@ public final class ShapeEditorScreen extends Screen {
         }
         awaitingReply = true;
         awaitingRemove = true;
+        ToolShapeData removing = minecraft.player == null ? null
+                : minecraft.player.getMainHandItem().get(ModComponents.TOOL_SHAPE.get());
+        if (minecraft.player != null && removing != null) {
+            ClientState.expectRemoval(handshake.sessionId(), minecraft.player.getUUID(),
+                    removing.config().orElse(null), removing.worldPreview());
+        }
         setStatus(Component.translatable("gui.shapeexcavator.status.applying"), MUTED);
         PacketDistributor.sendToServer(new RemoveShapePayload(handshake.sessionId(), slot, revision));
         refresh();
@@ -937,10 +955,15 @@ public final class ShapeEditorScreen extends Screen {
                 setStatus(Component.translatable("gui.shapeexcavator.status.applied_newer_unsaved"), WARN);
             } else {
                 setStatus(payload.message(), OK);
+                if (closeAfterApply) {
+                    closeNow();
+                    return;
+                }
             }
         } else {
             setStatus(payload.message(), ERROR);
         }
+        closeAfterApply = false;
         refresh();
     }
 
@@ -1003,6 +1026,18 @@ public final class ShapeEditorScreen extends Screen {
                 return true;
             }
         }
+        if (menu == null && (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)) {
+            if (getFocused() instanceof EditBox box && box.isFocused()) {
+                // Enter commits the field only. A subsequent Enter with no field focused applies.
+                setFocused(null);
+                return true;
+            }
+            if (canApply()) {
+                closeAfterApply = true;
+                apply();
+            }
+            return true;
+        }
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
@@ -1028,7 +1063,14 @@ public final class ShapeEditorScreen extends Screen {
         if (super.mouseClicked(mx, my, button)) {
             return true;
         }
-        if (button == 0 && inPreview(mx, my)) {
+        if ((button == 0 || (button == 1 && draft.type() == ShapeType.CUSTOM)) && inPreview(mx, my)) {
+            setFocused(null);
+            previewButton = button;
+            previewPressX = mx;
+            previewPressY = my;
+            draggingCamera = false;
+            // Custom clicks edit on release. Double-click remains a camera reset for templates.
+            if (draft.type() == ShapeType.CUSTOM || button != 0) return true;
             long now = Util.getMillis();
             if (now - lastPreviewClick <= DOUBLE_CLICK_MS && Math.abs(mx - lastPreviewClickX) < 4
                     && Math.abs(my - lastPreviewClickY) < 4) {
@@ -1040,16 +1082,17 @@ public final class ShapeEditorScreen extends Screen {
                 lastPreviewClickX = mx;
                 lastPreviewClickY = my;
             }
-            draggingCamera = true;
             return true;
         }
         Cell cell = gridCell(mx, my);
         if (cell != null && (button == 0 || button == 1)) {
             setFocused(null);
             if (anchorMode && button == 0) {
-                anchorMode = false;
-                customEdited(draft.custom().setAnchor(cell.x(), cell.y(), cell.z()));
-                refresh();
+                if (draft.custom().get(cell.x(), cell.y(), cell.z())) {
+                    anchorMode = false;
+                    customEdited(draft.custom().setAnchor(cell.x(), cell.y(), cell.z()));
+                    refresh();
+                }
                 return true;
             }
             paintValue = button == 0;
@@ -1062,8 +1105,12 @@ public final class ShapeEditorScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
-        if (draggingCamera) {
-            camera.drag(dx, dy);
+        if (previewButton >= 0) {
+            if (!draggingCamera && PreviewPicking.isDrag(previewPressX, previewPressY, mx, my)) {
+                draggingCamera = true;
+                lastPreviewClick = 0L;
+                if (previewButton == 0) camera.drag(mx - previewPressX, my - previewPressY);
+            } else if (draggingCamera && previewButton == 0) camera.drag(dx, dy);
             return true;
         }
         if (paintValue != null) {
@@ -1078,6 +1125,13 @@ public final class ShapeEditorScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
+        if (previewButton == button) {
+            if (!draggingCamera && !PreviewPicking.isDrag(previewPressX, previewPressY, mx, my)
+                    && draft.type() == ShapeType.CUSTOM && inPreview(mx, my)) editPreview(mx, my, button);
+            previewButton = -1;
+            draggingCamera = false;
+            return true;
+        }
         if (paintValue != null) {
             draft.custom().endStroke();
             paintValue = null;
@@ -1110,15 +1164,36 @@ public final class ShapeEditorScreen extends Screen {
 
     /** Sets, never toggles, so dragging over a cell twice keeps it as painted (plan §6.5). */
     private void paint(Cell cell) {
-        if (draft.custom().set(cell.x(), cell.y(), cell.z(), paintValue)) {
-            changed();
-        }
+        customEdited(draft.custom().set(cell.x(), cell.y(), cell.z(), paintValue));
+    }
+
+    private GeneratedShape customPreview() {
+        return customShown;
+    }
+
+    private void editPreview(double mx, double my, int button) {
+        preview.pick(mx, my, layer).ifPresent(hit -> {
+            Cell target = anchorMode || button == 1 ? (hit.selected() ? hit.cell() : null)
+                    : PreviewPicking.addTarget(hit, customPreview().mask()).orElse(null);
+            if (target == null) return;
+            CustomMaskDraft custom = draft.custom();
+            Cell cell = CustomCanvas.toDraft(target, custom.width(), custom.height(), draft.transform());
+            if (anchorMode && button == 0) {
+                anchorMode = false;
+                customEdited(custom.setAnchor(cell.x(), cell.y(), cell.z()));
+                refresh();
+            } else if (!anchorMode) customEdited(custom.set(cell.x(), cell.y(), cell.z(), button == 0));
+        });
     }
 
     // ---------------------------------------------------------------- rendering
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        graphics.flush();
+        com.mojang.blaze3d.systems.RenderSystem.clear(org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT,
+                net.minecraft.client.Minecraft.ON_OSX);
+        graphics.fill(0, 0, width, height, 0xFF171A20);
         // Widgets under an open menu get no hover.
         boolean overMenu = menu != null && menu.contains(mouseX, mouseY);
         int mx = overMenu ? -1 : mouseX;
@@ -1202,14 +1277,16 @@ public final class ShapeEditorScreen extends Screen {
         graphics.renderOutline(previewX0, previewY0, previewX1 - previewX0, previewY1 - previewY0, 0xFF3A3F47);
         GeneratedShape current = evaluation == null ? null : evaluation.shape().orElse(null);
         GeneratedShape shown = current != null ? current : lastValid;
+        boolean custom = draft.type() == ShapeType.CUSTOM;
+        if (custom) shown = customPreview();
         boolean stairLike = draft.type() == ShapeType.STAIR || draft.type() == ShapeType.CORRIDOR;
         if (shown != null) {
             // Only the scene between the caption and hint strips, so the shape and its labels never cover them.
             preview.render(graphics, font, previewX0 + 1, sceneY0, previewX1 - 1, sceneY1, shown, camera,
-                    resultView && stairLike);
+                    resultView && stairLike, custom, layer, mouseX, mouseY, anchorMode);
         }
         graphics.enableScissor(previewX0 + 1, previewY0 + 1, previewX1 - 1, previewY1 - 1);
-        if (current == null && lastValid != null) {
+        if (!custom && current == null && lastValid != null) {
             drawWrapped(graphics, Component.translatable("gui.shapeexcavator.last_valid"), captionY, captionWidth,
                     WARN);
         } else if (resultView && stairLike) {
@@ -1219,7 +1296,8 @@ public final class ShapeEditorScreen extends Screen {
             drawWrapped(graphics, Component.translatable("gui.shapeexcavator.preview.selection"), captionY,
                     captionWidth, MUTED);
         }
-        drawWrapped(graphics, Component.translatable("gui.shapeexcavator.preview.controls"), hintY,
+        drawWrapped(graphics, Component.translatable(custom ? "gui.shapeexcavator.preview.custom_controls"
+                : "gui.shapeexcavator.preview.controls"), hintY,
                 Math.max(20, previewX1 - previewX0 - 8), MUTED);
         graphics.disableScissor();
         for (AbstractWidget widget : previewWidgets) {
@@ -1230,6 +1308,7 @@ public final class ShapeEditorScreen extends Screen {
     private void renderSummary(GuiGraphics graphics) {
         GeneratedShape current = evaluation == null ? null : evaluation.shape().orElse(null);
         GeneratedShape shown = current != null ? current : lastValid;
+        if (draft.type() == ShapeType.CUSTOM) shown = customPreview();
         if (shown != null) {
             // The summary shares its row with the world preview checkbox: keep left of it, wrap if needed.
             int maxWidth = Math.max(20, summaryMaxX - leftX);
@@ -1269,6 +1348,10 @@ public final class ShapeEditorScreen extends Screen {
             return Component.translatable("gui.shapeexcavator.resize.pending", pendingResize.lostCells());
         }
         if (evaluation.resizePending()) {
+            Optional<CustomMaskDraft.ResizeCheck> request = draft.requestedCustomResize(limits());
+            if (request.isPresent() && !request.get().anchorInside()) {
+                return Component.translatable("gui.shapeexcavator.resize.anchor_outside");
+            }
             return Component.translatable("gui.shapeexcavator.resize.size_mismatch");
         }
         if (evaluation.result() instanceof ShapeGenerator.Invalid invalid) {

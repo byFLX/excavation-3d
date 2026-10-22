@@ -3,16 +3,18 @@ package com.byflx.shapeexcavator.client.screen;
 import com.byflx.shapeexcavator.preview.LabelPlacement;
 import com.byflx.shapeexcavator.preview.PreviewScale;
 import com.byflx.shapeexcavator.preview.ShapeDiff;
+import com.byflx.shapeexcavator.preview.CustomCanvas;
+import com.byflx.shapeexcavator.preview.PreviewPicking;
 import com.byflx.shapeexcavator.shape.Cell;
 import com.byflx.shapeexcavator.shape.GeneratedShape;
 import com.byflx.shapeexcavator.shape.ShapeMask;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import com.mojang.math.Axis;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
@@ -20,20 +22,20 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.Mth;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
 
 /**
  * Renders the selected cells of a {@link GeneratedShape} as real cubes in the editor (plan §5):
- * only selected cells are drawn, so a plus looks like a plus and custom holes stay visible. Faces
+ * selected cells are solid, so a plus looks like a plus and custom holes stay visible. Faces
  * between two selected cells are skipped. Adds a floor grid, labelled width/height/depth axes, the
  * anchor in gold and an arrow pointing from the front into the block.
  *
  * <p>The block scale stays fixed while the shape changes ({@link PreviewScale}), so a size change
  * reads as one against the 1-block floor grid; added cells flash green and removed cells red for a
- * moment. Dimension labels are placed beside the shape, never on it ({@link LabelPlacement}).
+ * second. Custom mode also draws the canvas and current-layer ghosts. Dimension labels attach to
+ * their edge midpoints with leaders ({@link LabelPlacement#edges}).
  *
  * <p>Local axes: x = width (right), y = height (up), z = depth (into the block, away from the
  * viewer in the front view). The mesh is cached per shape; camera changes only change the matrix.
@@ -42,8 +44,8 @@ public final class ShapePreviewRenderer {
     private static final int SELECTED = 0x5DA9E9;
     private static final int ANCHOR = 0xF1C232;
     private static final int ENVIRONMENT = 0x8C8C8C;
-    private static final int ADDED = 0x55FF55;
-    private static final int REMOVED = 0xFF5555;
+    private static final int ADDED = 0x20FF20;
+    private static final int REMOVED = 0xFF2020;
     private static final int GRID = 0xFF3A3A3A;
     private static final int GRID_FOOTPRINT = 0xFF5A5A5A;
     private static final int AXIS_WIDTH = 0xFFE05050;
@@ -52,7 +54,7 @@ public final class ShapePreviewRenderer {
     private static final int FORWARD = 0xFFFFFFFF;
     /** Grid cells drawn beyond the footprint on every side. */
     private static final int GRID_EXTRA = 2;
-    private static final long HIGHLIGHT_MS = 900L;
+    private static final long HIGHLIGHT_MS = 1000L;
     /** Distance of the labels from the scene edges; the caller keeps captions and buttons outside the scene. */
     private static final int LABEL_PADDING = 2;
     // Brightness per face: -x, +x, -y, +y, -z (front), +z (back).
@@ -75,6 +77,16 @@ public final class ShapePreviewRenderer {
     private GeneratedShape highlightShape;
     private ShapeDiff highlight = ShapeDiff.NONE;
     private long highlightStart;
+    private PreviewPicking.Camera pickingCamera;
+    private ShapeMask pickingMask;
+    private int pickX0, pickY0, pickX1, pickY1;
+
+    public Optional<PreviewPicking.Hit> pick(double x, double y, int layer) {
+        if (pickingCamera == null || x < pickX0 || x >= pickX1 || y < pickY0 || y >= pickY1) {
+            return Optional.empty();
+        }
+        return PreviewPicking.pick(pickingCamera, x, y, pickingMask, layer);
+    }
 
     /** Forgets the block scale, so the next frame fits the shape again (double-click reset). */
     public void resetScale() {
@@ -98,7 +110,11 @@ public final class ShapePreviewRenderer {
      * @param resultView draw the schematic "what remains" view for stairs instead of the selection
      */
     public void render(GuiGraphics graphics, Font font, int x0, int y0, int x1, int y1, GeneratedShape shape,
-            PreviewCamera camera, boolean resultView) {
+            PreviewCamera camera, boolean resultView, boolean custom, int layer, double mouseX, double mouseY,
+            boolean anchorMode) {
+        // Front gets a dedicated line, never part of a row of dimensions.
+        int frontY = y1 - font.lineHeight - 2;
+        y1 = frontY - 3;
         if (!shape.equals(cachedShape) || resultView != cachedResultView) {
             rebuild(shape, resultView);
             cachedShape = shape;
@@ -122,33 +138,35 @@ public final class ShapePreviewRenderer {
         graphics.enableScissor(x0, y0, x1, y1);
         PoseStack pose = graphics.pose();
         pose.pushPose();
-        pose.translate((x0 + x1) / 2.0F, (y0 + y1) / 2.0F, 400.0F);
-        pose.scale(scale, scale, scale);
-        pose.mulPose(Axis.XP.rotationDegrees(-camera.elevation()));
-        pose.mulPose(Axis.YP.rotationDegrees(camera.yaw()));
-        // GUI space has y down and z towards the viewer; local space has y up and z into the block.
-        pose.scale(1.0F, -1.0F, -1.0F);
-        pose.translate(-w / 2.0F, -h / 2.0F, -d / 2.0F);
+        pickingCamera = new PreviewPicking.Camera((x0 + x1) / 2.0, (y0 + y1) / 2.0, scale,
+                camera.yaw(), camera.elevation(), w, h, d);
+        pickingMask = shape.mask();
+        pickX0 = x0; pickY0 = y0; pickX1 = x1; pickY1 = y1;
+        pose.mulPose(new Matrix4f().set(pickingCamera.matrix()));
         Matrix4f matrix = new Matrix4f(pose.last().pose());
         ShapeDiff active = resultView ? ShapeDiff.NONE : activeHighlight(shape);
 
-        List<PendingLabel> pending = labels(font, matrix, shape, resultView);
+        List<PendingLabel> pending = labels(font, matrix, shape);
         List<LabelPlacement.Label> anchors = new ArrayList<>(pending.size());
         for (PendingLabel label : pending) {
             anchors.add(label.anchor());
         }
         LabelPlacement.Rect panel = new LabelPlacement.Rect(x0 + LABEL_PADDING, y0 + LABEL_PADDING,
                 x1 - LABEL_PADDING, y1 - LABEL_PADDING);
-        // Removed-block ghosts are drawn outside the shape; the labels keep clear of them too.
-        LabelPlacement.Layout layout = LabelPlacement.layout(anchors, projectedBox(matrix, active.bounds(shape)),
-                panel);
-        // Without a free side the labels sit in a strip at the bottom; the shape is clipped above it.
-        if (layout.clipsShape()) {
-            graphics.enableScissor(x0, y0, x1, Mth.clamp(layout.shapeMaxY(), y0, y1));
-        }
+        LabelPlacement.Layout layout = LabelPlacement.edges(anchors, panel);
 
         VertexConsumer consumer = graphics.bufferSource().getBuffer(RenderType.gui());
         drawGrid(consumer, matrix, w, d);
+        if (custom) {
+            outline(consumer, matrix, 0, 0, 0, w, h, d, 0.015F, 0x668DA9C0);
+            for (Cell ghost : CustomCanvas.ghosts(shape.mask(), layer)) {
+                outline(consumer, matrix, ghost.x(), ghost.y(), ghost.z(),
+                        ghost.x() + 1, ghost.y() + 1, ghost.z() + 1, 0.008F, 0x244F6578);
+            }
+            if (!shape.mask().contains(shape.anchor().x(), shape.anchor().y(), shape.anchor().z())) {
+                outlineCell(consumer, matrix, shape.anchor(), 0xFFF1C232);
+            }
+        }
         for (int q = 0; q < quads; q++) {
             quad(consumer, matrix, vertices, q * 12, colors[q]);
         }
@@ -159,42 +177,62 @@ public final class ShapePreviewRenderer {
             float ay = anchor.y() + 0.5F;
             bar(consumer, matrix, ax, ay, anchor.z() - 1.8F, ax, ay, anchor.z(), 0.06F, FORWARD);
             drawHighlight(consumer, matrix, shape, active);
+            if (custom) {
+                pick(mouseX, mouseY, layer).ifPresent(hit -> {
+                    if (anchorMode) {
+                        if (hit.selected()) outlineCell(consumer, matrix, hit.cell(), 0xFFF1C232);
+                    } else {
+                        if (hit.selected() && !hit.cell().equals(shape.anchor())) {
+                            outlineCell(consumer, matrix, hit.cell(), 0xFFFF2020);
+                        }
+                        PreviewPicking.addTarget(hit, shape.mask())
+                                .ifPresent(cell -> outlineCell(consumer, matrix, cell, 0xFF20FF20));
+                    }
+                });
+            }
         }
         graphics.flush();
-        if (layout.clipsShape()) {
-            graphics.disableScissor();
-        }
         pose.popPose();
         // The labels must stay readable in front of the cubes.
         RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
 
         for (int i = 0; i < pending.size(); i++) {
             LabelPlacement.Rect at = layout.labels().get(i);
+            // Leader connects each label to the middle of its own edge, even at awkward camera angles.
+            PendingLabel edge = pending.get(i);
+            graphics.fill(Math.min(edge.edgeX(), at.x0() + (at.x1() - at.x0()) / 2), edge.edgeY(),
+                    Math.max(edge.edgeX(), at.x0() + (at.x1() - at.x0()) / 2) + 1, edge.edgeY() + 1,
+                    pending.get(i).color());
+            graphics.fill(at.x0() + (at.x1() - at.x0()) / 2, Math.min(edge.edgeY(), at.y0()),
+                    at.x0() + (at.x1() - at.x0()) / 2 + 1, Math.max(edge.edgeY(), at.y0()) + 1,
+                    pending.get(i).color());
+        }
+        // All leaders go behind all labels.
+        for (int i = 0; i < pending.size(); i++) {
+            LabelPlacement.Rect at = layout.labels().get(i);
+            graphics.fill(at.x0() - 2, at.y0(), at.x1() + 2, at.y1() + 1, 0xFF0E1116);
             graphics.drawString(font, pending.get(i).text(), at.x0(), at.y0() + 1, pending.get(i).color());
         }
         graphics.disableScissor();
+        if (!resultView) graphics.drawCenteredString(font, Component.translatable("gui.shapeexcavator.axis.front"),
+                (x0 + x1) / 2, frontY, FORWARD);
     }
 
-    private record PendingLabel(Component text, int color, LabelPlacement.Label anchor) {
+    private record PendingLabel(Component text, int color, LabelPlacement.Label anchor, int edgeX, int edgeY) {
     }
 
-    /** The width, height and depth labels at their axis ends, plus "Front" in front of the anchor. */
-    private static List<PendingLabel> labels(Font font, Matrix4f matrix, GeneratedShape shape, boolean resultView) {
+    /** The width, height and depth labels at the middle of their own edges. */
+    private static List<PendingLabel> labels(Font font, Matrix4f matrix, GeneratedShape shape) {
         int w = shape.width();
         int h = shape.height();
         int d = shape.depth();
-        List<PendingLabel> labels = new ArrayList<>(4);
-        labels.add(label(font, matrix, w + 0.9F, 0, 0, Component.translatable("gui.shapeexcavator.axis.width", w),
+        List<PendingLabel> labels = new ArrayList<>(3);
+        labels.add(label(font, matrix, w / 2.0F, -0.8F, 0, w / 2.0F, 0, 0, Component.translatable("gui.shapeexcavator.axis.width", w),
                 AXIS_WIDTH));
-        labels.add(label(font, matrix, 0, h + 0.9F, 0, Component.translatable("gui.shapeexcavator.axis.height", h),
+        labels.add(label(font, matrix, -0.8F, h / 2.0F, 0, 0, h / 2.0F, 0, Component.translatable("gui.shapeexcavator.axis.height", h),
                 AXIS_HEIGHT));
-        labels.add(label(font, matrix, 0, 0, d + 0.9F, Component.translatable("gui.shapeexcavator.axis.depth", d),
+        labels.add(label(font, matrix, -0.8F, 0, d / 2.0F, 0, 0, d / 2.0F, Component.translatable("gui.shapeexcavator.axis.depth", d),
                 AXIS_DEPTH));
-        if (!resultView) {
-            Cell anchor = shape.anchor();
-            labels.add(label(font, matrix, anchor.x() + 0.5F, anchor.y() + 0.5F, anchor.z() - 2.2F,
-                    Component.translatable("gui.shapeexcavator.axis.front"), FORWARD));
-        }
         return labels;
     }
 
@@ -291,8 +329,30 @@ public final class ShapePreviewRenderer {
         long elapsed = Util.getMillis() - highlightStart;
         float fade = Math.max(0.0F, 1.0F - (float) elapsed / HIGHLIGHT_MS);
         Cell anchor = shape.anchor();
-        overlay(consumer, matrix, diff.added(), anchor, ADDED, 0.6F * fade, 0.03F);
-        overlay(consumer, matrix, diff.removed(), anchor, REMOVED, 0.5F * fade, 0.0F);
+        overlay(consumer, matrix, diff.added(), anchor, ADDED, 0.95F * fade, 0.035F);
+        overlay(consumer, matrix, diff.removed(), anchor, REMOVED, 0.85F * fade, 0.0F);
+        for (Cell rel : diff.added()) outlineCell(consumer, matrix,
+                new Cell(rel.x() + anchor.x(), rel.y() + anchor.y(), rel.z() + anchor.z()),
+                (Math.round(255 * fade) << 24) | ADDED);
+        for (Cell rel : diff.removed()) outlineCell(consumer, matrix,
+                new Cell(rel.x() + anchor.x(), rel.y() + anchor.y(), rel.z() + anchor.z()),
+                (Math.round(255 * fade) << 24) | REMOVED);
+    }
+
+    private static void outlineCell(VertexConsumer c, Matrix4f m, Cell p, int color) {
+        outline(c, m, p.x() - 0.04F, p.y() - 0.04F, p.z() - 0.04F,
+                p.x() + 1.04F, p.y() + 1.04F, p.z() + 1.04F, 0.025F, color);
+    }
+
+    private static void outline(VertexConsumer c, Matrix4f m, float x, float y, float z,
+            float x1, float y1, float z1, float t, int color) {
+        for (float yy : new float[] {y, y1}) {
+            for (float zz : new float[] {z, z1}) bar(c, m, x, yy, zz, x1, yy, zz, t, color);
+        }
+        for (float xx : new float[] {x, x1}) {
+            for (float zz : new float[] {z, z1}) bar(c, m, xx, y, zz, xx, y1, zz, t, color);
+            for (float yy : new float[] {y, y1}) bar(c, m, xx, yy, z, xx, yy, z1, t, color);
+        }
     }
 
     /** Outer faces of the anchor-relative {@code cells}, placed at the shown shape's anchor. */
@@ -386,30 +446,11 @@ public final class ShapePreviewRenderer {
         }
     }
 
-    /** The screen rectangle covered by {@code box}: the shape's bounding box plus any removed-block ghosts. */
-    private static LabelPlacement.Rect projectedBox(Matrix4f matrix, ShapeDiff.Bounds box) {
-        float minX = Float.MAX_VALUE;
-        float minY = Float.MAX_VALUE;
-        float maxX = -Float.MAX_VALUE;
-        float maxY = -Float.MAX_VALUE;
-        Vector3f p = new Vector3f();
-        for (int corner = 0; corner < 8; corner++) {
-            matrix.transformPosition((corner & 1) == 0 ? box.minX() : box.maxX(),
-                    ((corner >> 1) & 1) == 0 ? box.minY() : box.maxY(),
-                    ((corner >> 2) & 1) == 0 ? box.minZ() : box.maxZ(), p);
-            minX = Math.min(minX, p.x());
-            minY = Math.min(minY, p.y());
-            maxX = Math.max(maxX, p.x());
-            maxY = Math.max(maxY, p.y());
-        }
-        return new LabelPlacement.Rect((int) Math.floor(minX), (int) Math.floor(minY), (int) Math.ceil(maxX),
-                (int) Math.ceil(maxY));
-    }
-
-    private static PendingLabel label(Font font, Matrix4f matrix, float x, float y, float z, Component text,
-            int color) {
+    private static PendingLabel label(Font font, Matrix4f matrix, float x, float y, float z,
+            float edgeX, float edgeY, float edgeZ, Component text, int color) {
         Vector3f screen = matrix.transformPosition(x, y, z, new Vector3f());
+        Vector3f edge = matrix.transformPosition(edgeX, edgeY, edgeZ, new Vector3f());
         return new PendingLabel(text, color, new LabelPlacement.Label(Math.round(screen.x()), Math.round(screen.y()),
-                font.width(text), font.lineHeight));
+                font.width(text), font.lineHeight), Math.round(edge.x()), Math.round(edge.y()));
     }
 }

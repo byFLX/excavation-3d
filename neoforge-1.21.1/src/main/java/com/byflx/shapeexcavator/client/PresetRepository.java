@@ -21,9 +21,8 @@ import org.slf4j.Logger;
 
 /**
  * Personal named presets, stored on the client in {@code config/shapeexcavator-presets.json}
- * (plan §9). A preset is only a draft source: loading one goes through the editor, which checks it
- * against the server's limits again. Tools never depend on this file. Broken entries are skipped,
- * not fatal.
+ * (plan §9). Loading one in the editor creates a draft; the quick menu sends it through the same
+ * validated server Apply session. Tools never depend on this file. Broken entries are skipped.
  */
 public final class PresetRepository {
     public static final int MAX_PRESETS = 64;

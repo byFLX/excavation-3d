@@ -3,7 +3,6 @@ package com.byflx.shapeexcavator.client;
 import com.byflx.shapeexcavator.data.ToolShapeData;
 import com.byflx.shapeexcavator.preview.CellCategory;
 import com.byflx.shapeexcavator.registry.ModTags;
-import com.byflx.shapeexcavator.text.ShapeTexts;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -25,14 +24,14 @@ public final class ToolHud {
         if (minecraft.player == null || minecraft.options.hideGui || minecraft.screen != null) {
             return;
         }
-        // Only tools that carry a shape get a hint; every other tool looks like vanilla (plan §2a).
+        // Eligible tools also show Off, so the quick menu's normal-mining state is visible.
         ToolShapeData data = ModTags.shapeOf(minecraft.player.getMainHandItem());
-        if (data == null) {
+        if (!minecraft.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) {
             return;
         }
         Component line = ClientState.bypassActive()
                 ? Component.translatable("tool.shapeexcavator.single_block").withStyle(ChatFormatting.YELLOW)
-                : ShapeTexts.toolSummary(data, ClientState.limits());
+                : ClientState.toolSummary(data);
         GuiGraphics graphics = event.getGuiGraphics();
         int centre = graphics.guiWidth() / 2;
         int y = graphics.guiHeight() - 72;

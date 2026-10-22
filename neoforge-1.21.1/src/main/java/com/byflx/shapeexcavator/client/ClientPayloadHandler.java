@@ -12,6 +12,7 @@ public final class ClientPayloadHandler {
 
     public static void onEditSession(EditSessionPayload payload) {
         ClientState.setLimits(payload.maxAxis(), payload.maxSelected());
+        QuickShapeAction.onSession(payload);
         ShapeEditorScreen editor = ClientState.editor();
         if (editor != null) {
             editor.onSession(payload);
@@ -19,6 +20,8 @@ public final class ClientPayloadHandler {
     }
 
     public static void onApplyResult(ApplyResultPayload payload) {
+        ClientState.removalResult(payload.sessionId(), payload.accepted());
+        QuickShapeAction.onResult(payload);
         ShapeEditorScreen editor = ClientState.editor();
         if (editor != null) {
             editor.onApplyResult(payload);

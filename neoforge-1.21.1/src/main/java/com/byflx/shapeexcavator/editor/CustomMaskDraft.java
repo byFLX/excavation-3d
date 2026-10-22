@@ -95,6 +95,7 @@ public final class CustomMaskDraft {
 
     /** Sets one cell. Returns whether anything changed. Outside the box nothing happens. */
     public boolean set(int x, int y, int z, boolean selected) {
+        if (!selected && anchor.equals(new Cell(x, y, z))) return false;
         if (!inBox(x, y, z) || bits.get(index(x, y, z)) == selected) {
             return false;
         }
@@ -123,12 +124,15 @@ public final class CustomMaskDraft {
         int from = index(0, 0, z);
         int to = from + width * height;
         BitSet layer = bits.get(from, to);
+        if (!selected && anchor.z() == z) layer.clear(anchor.y() * width + anchor.x());
         boolean unchanged = selected ? layer.cardinality() == width * height : layer.isEmpty();
         if (unchanged) {
             return false;
         }
         pushUndo();
+        boolean keepAnchor = get(anchor.x(), anchor.y(), anchor.z());
         bits.set(from, to, selected);
+        if (keepAnchor) bits.set(index(anchor.x(), anchor.y(), anchor.z()));
         return true;
     }
 
@@ -161,6 +165,7 @@ public final class CustomMaskDraft {
                 next.set(index(x, y, z), value);
             }
         }
+        if (get(anchor.x(), anchor.y(), anchor.z())) next.set(index(anchor.x(), anchor.y(), anchor.z()));
         if (next.equals(bits)) {
             return false;
         }

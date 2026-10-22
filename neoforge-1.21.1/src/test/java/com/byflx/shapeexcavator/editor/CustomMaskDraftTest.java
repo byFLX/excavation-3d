@@ -97,7 +97,7 @@ class CustomMaskDraftTest {
         assertFalse(draft.get(0, 0, 2));
         assertTrue(draft.get(1, 0, 2));
         assertTrue(draft.fillLayer(0, false));
-        assertEquals(5, draft.count());
+        assertEquals(6, draft.count()); // The selected start block survives clearing its layer.
         assertTrue(draft.undo());
         assertEquals(10, draft.count());
     }
@@ -110,6 +110,36 @@ class CustomMaskDraftTest {
         assertFalse(draft.setAnchor(3, 0, 0));
         assertTrue(draft.undo());
         assertEquals(new Cell(1, 1, 0), draft.anchor());
+    }
+
+    @Test
+    void startBlockCannotBePaintedClearedOrPastedAway() {
+        var draft = CustomMaskDraft.fromMask(ShapeMask.full(3, 3, 2, new Cell(1, 1, 0)));
+        assertFalse(draft.set(1, 1, 0, false));
+        assertFalse(draft.canUndo());
+        assertTrue(draft.fillLayer(0, false));
+        assertTrue(draft.get(1, 1, 0));
+        assertTrue(draft.undo());
+        assertEquals(18, draft.count());
+        draft.fillLayer(1, false);
+        draft.copyLayer(1);
+        assertTrue(draft.pasteLayer(0));
+        assertEquals(1, draft.count());
+        assertTrue(draft.get(1, 1, 0));
+        assertTrue(draft.undo());
+        assertEquals(9, draft.count());
+    }
+
+    @Test
+    void failedShrinkCannotPreventLaterGrowthOnAnyAxis() {
+        var draft = CustomMaskDraft.empty(3, 3, 3);
+        draft.setAnchor(2, 2, 2);
+        assertFalse(draft.resize(2, 3, 3));
+        assertTrue(draft.checkResize(8, 3, 3).allowedWithoutConfirmation());
+        assertTrue(draft.resize(8, 3, 3));
+        assertTrue(draft.resize(8, 16, 3));
+        assertTrue(draft.resize(8, 16, 8));
+        assertEquals(new Cell(2, 2, 2), draft.anchor());
     }
 
     @Test
