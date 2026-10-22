@@ -92,7 +92,8 @@ public final class ExcavationService {
         final List<BlockPos> targets;
         final Map<SkipReason, Integer> skipped = new EnumMap<>(SkipReason.class);
         int next;
-        int mined;
+        /** Starts at 1: an operation only exists once the start block was confirmed removed. */
+        int mined = 1;
         boolean finished;
 
         Operation(ServerPlayer player, Pending pending, List<BlockPos> targets) {

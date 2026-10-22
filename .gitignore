@@ -33,6 +33,7 @@ bin/
 run/
 run-client-*/
 run-server/
+run-gametest/
 
 # java
 

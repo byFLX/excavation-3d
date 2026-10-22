@@ -27,17 +27,25 @@ import net.neoforged.neoforge.network.PacketDistributor;
 public final class EditSessions {
     /** Minimum ticks between two apply requests of one player. */
     static final int MIN_TICKS_BETWEEN_APPLIES = 5;
+    /** Begin requests per player and window; reopening the editor a few times stays allowed. */
+    static final int MAX_BEGINS_PER_WINDOW = 4;
+    static final int BEGIN_WINDOW_TICKS = 40;
 
     private record Session(int id, int slot, UUID toolId) {
     }
 
     private static final Map<UUID, Session> SESSIONS = new HashMap<>();
     private static final Map<UUID, Integer> LAST_APPLY_TICK = new HashMap<>();
+    private static final RequestThrottle BEGINS = new RequestThrottle(MAX_BEGINS_PER_WINDOW, BEGIN_WINDOW_TICKS);
 
     private EditSessions() {
     }
 
     static void begin(ServerPlayer player, int slot) {
+        // Flooding is dropped before any session, tool data or reply is created.
+        if (!BEGINS.tryAcquire(player.getUUID(), player.server.getTickCount())) {
+            return;
+        }
         ShapeLimits limits = ServerConfig.limits();
         ItemStack stack = toolInSelectedSlot(player, slot);
         if (stack == null) {
@@ -98,11 +106,13 @@ public final class EditSessions {
     static void end(UUID player) {
         SESSIONS.remove(player);
         LAST_APPLY_TICK.remove(player);
+        BEGINS.forget(player);
     }
 
     static void clear() {
         SESSIONS.clear();
         LAST_APPLY_TICK.clear();
+        BEGINS.clear();
     }
 
     /** The tool in {@code slot}, if that is the selected hotbar slot and holds the tool; otherwise null. */

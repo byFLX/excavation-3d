@@ -35,6 +35,12 @@ neoForge {
             gameDirectory = file('run-server')
             programArgument 'nogui'
         }
+        // World-level excavation tests (gametest/ExcavationGameTests); exits non-zero on failure.
+        gameTestServer {
+            type = 'gameTestServer'
+            gameDirectory = file('run-gametest')
+            systemProperty 'neoforge.enabledGameTestNamespaces', 'shapeexcavator'
+        }
     }
 
     mods {

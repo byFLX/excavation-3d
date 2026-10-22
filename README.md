@@ -4,7 +4,7 @@ Standalone Minecraft 1.21.1 / NeoForge 21.1.x mod: a hand tool whose excavation 
 
 - Plan and acceptance criteria: [docs/SHAPE_EXCAVATOR_PLAN.md](docs/SHAPE_EXCAVATOR_PLAN.md)
 - Acceptance matrix (automated evidence and open in-game checks): [docs/ACCEPTANCE_MATRIX.md](docs/ACCEPTANCE_MATRIX.md)
-- Gradle project: `neoforge-1.21.1/` (`./gradlew test build`)
+- Gradle project: `neoforge-1.21.1/` (`./gradlew test build`; world-level Game Tests: `./gradlew runGameTestServer`)
 - Status: stages 1–5 of the plan are implemented (geometric core, editor with 3D preview, custom layer editor and presets, tool data component with server-confirmed apply and world preview, server-side excavation). The in-game and multiplayer checks of stage 6 are listed as open in the acceptance matrix; they have not been run.
 
 ## Using the tool
@@ -24,5 +24,6 @@ Standalone Minecraft 1.21.1 / NeoForge 21.1.x mod: a hand tool whose excavation 
 | `net` | Payloads and server-side editor sessions | both (handlers per side) |
 | `excavation` | Server-side excavation and tick budgets | server logic |
 | `client` | Editor screen, 3D preview, world preview, hint, keys, presets | client only |
+| `gametest` | Game Tests for excavation in the world; only active on the Game Test server | server |
 
 The scaffold uses the same ModDevGradle, NeoForge and JUnit versions as the byFLX Create Stock Instant Craft mod, so the Agent-Team's offline Gradle sandbox can build it from its existing dependency seed.

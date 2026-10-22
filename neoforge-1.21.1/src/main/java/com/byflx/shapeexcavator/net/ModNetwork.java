@@ -61,7 +61,8 @@ public final class ModNetwork {
     }
 
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player) {
+        // Connections without the negotiated channel (Game Test players) never get mod payloads.
+        if (event.getEntity() instanceof ServerPlayer player && player.connection.hasChannel(LimitsPayload.TYPE)) {
             ShapeLimits limits = ServerConfig.limits();
             PacketDistributor.sendToPlayer(player, new LimitsPayload(limits.maxAxis(), limits.maxSelected()));
         }
