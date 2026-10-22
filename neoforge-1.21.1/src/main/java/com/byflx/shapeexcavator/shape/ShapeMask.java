@@ -33,9 +33,7 @@ public final class ShapeMask {
         if (!inBox(width, height, depth, anchor.x(), anchor.y(), anchor.z())) {
             throw new IllegalArgumentException("anchor " + anchor + " outside " + width + "x" + height + "x" + depth);
         }
-        if (bits.length() > width * height * depth) {
-            throw new IllegalArgumentException("cell index " + (bits.length() - 1) + " outside the box");
-        }
+        checkCellsInBox(bits, width * height * depth);
         this.width = width;
         this.height = height;
         this.depth = depth;
@@ -50,10 +48,16 @@ public final class ShapeMask {
         this.positions = Collections.unmodifiableList(cells);
     }
 
-    /** Copies {@code cells} (layout: see class doc). */
+    /**
+     * Copies {@code cells} (layout: see class doc). Bounds are checked before copying and only the
+     * box range is copied, so an oversized input never causes an oversized allocation.
+     */
     public static ShapeMask of(int width, int height, int depth, BitSet cells, Cell anchor) {
         Objects.requireNonNull(cells, "cells");
-        return new ShapeMask(width, height, depth, (BitSet) cells.clone(), anchor);
+        checkAxes(width, height, depth);
+        int size = width * height * depth;
+        checkCellsInBox(cells, size);
+        return new ShapeMask(width, height, depth, cells.get(0, size), anchor);
     }
 
     /** Copies {@code cells}, indexed as {@code cells[x][y][z]}; the array must not be ragged. */
@@ -162,6 +166,12 @@ public final class ShapeMask {
         if (value < 1 || value > ShapeLimits.TECHNICAL_MAX_AXIS) {
             throw new IllegalArgumentException(
                     name + " must be in 1.." + ShapeLimits.TECHNICAL_MAX_AXIS + ": " + value);
+        }
+    }
+
+    private static void checkCellsInBox(BitSet bits, int size) {
+        if (bits.length() > size) {
+            throw new IllegalArgumentException("cell index " + (bits.length() - 1) + " outside the box");
         }
     }
 

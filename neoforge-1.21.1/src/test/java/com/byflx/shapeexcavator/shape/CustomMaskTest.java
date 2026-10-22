@@ -121,4 +121,19 @@ class CustomMaskTest {
         assertThrows(IllegalArgumentException.class,
                 () -> ShapeMask.of(new boolean[][][] {{{true}}, {{true, false}}}, new Cell(0, 0, 0)));
     }
+
+    @Test
+    void oversizedBitSetInputIsRejectedOrCopiedBounded() {
+        BitSet farOutside = new BitSet();
+        farOutside.set(10_000_000);
+        farOutside.set(0);
+        assertThrows(IllegalArgumentException.class, () -> ShapeMask.of(1, 1, 1, farOutside, new Cell(0, 0, 0)));
+
+        // new BitSet(n) keeps its large backing array on clone; the mask must retain only the box range.
+        BitSet largeStorage = new BitSet(10_000_000);
+        largeStorage.set(0);
+        ShapeMask mask = ShapeMask.of(1, 1, 1, largeStorage, new Cell(0, 0, 0));
+        assertEquals(1, mask.count());
+        assertTrue(mask.toBitSet().size() <= 64, "retained storage must be bounded by the box");
+    }
 }
