@@ -84,6 +84,7 @@
   "gui.shapeexcavator.status.connecting": "Verbinde mit dem Server …",
   "gui.shapeexcavator.status.damaged": "Die gespeicherte Form war unlesbar – Standard wird angezeigt",
   "gui.shapeexcavator.status.applying": "Warte auf den Server …",
+  "gui.shapeexcavator.status.applied_newer_unsaved": "Frühere Fassung übernommen – deine späteren Änderungen sind noch nicht übernommen",
   "gui.shapeexcavator.template.surface": "Fläche (Tiefe 1)",
   "gui.shapeexcavator.template.line": "Linie",
   "gui.shapeexcavator.direction": "Richtung",

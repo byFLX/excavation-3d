@@ -4,6 +4,7 @@ import com.byflx.shapeexcavator.client.ClientState;
 import com.byflx.shapeexcavator.client.PresetRepository;
 import com.byflx.shapeexcavator.data.ToolShapeData;
 import com.byflx.shapeexcavator.editor.CustomMaskDraft;
+import com.byflx.shapeexcavator.editor.DraftSaveState;
 import com.byflx.shapeexcavator.editor.EditorDraft;
 import com.byflx.shapeexcavator.net.ApplyResultPayload;
 import com.byflx.shapeexcavator.net.ApplyShapePayload;
@@ -64,7 +65,8 @@ public final class ShapeEditorScreen extends Screen {
     private final int slot;
     private EditorDraft draft;
     private boolean worldPreview;
-    private boolean dirty;
+    private final DraftSaveState saveState = new DraftSaveState();
+    private long submittedGeneration;
     private boolean resultView;
     private EditorDraft.Evaluation evaluation;
     private GeneratedShape lastValid;
@@ -400,7 +402,7 @@ public final class ShapeEditorScreen extends Screen {
         addRenderableWidget(CycleButton.onOffBuilder(worldPreview)
                 .create(x, y, w, 20, Component.translatable("gui.shapeexcavator.world_preview"), (button, value) -> {
                     worldPreview = value;
-                    dirty = true;
+                    saveState.edited();
                 }));
         x += w + gap;
         applyButton = addRenderableWidget(Button.builder(Component.translatable("gui.shapeexcavator.apply"),
@@ -450,7 +452,7 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private void changed() {
-        dirty = true;
+        saveState.edited();
         refresh();
     }
 
@@ -459,13 +461,13 @@ public final class ShapeEditorScreen extends Screen {
         anchorMode = false;
         pendingResize = null;
         scroll = 0;
-        dirty = true;
+        saveState.edited();
         rebuildWidgets();
     }
 
     private void onFieldEdited(String field, String text) {
         draft.setText(field, text);
-        dirty = true;
+        saveState.edited();
         if (draft.type() == ShapeType.CUSTOM) {
             handleCustomResize();
         }
@@ -511,7 +513,7 @@ public final class ShapeEditorScreen extends Screen {
         if (pendingResize != null) {
             draft.custom().resize(pendingResize.width(), pendingResize.height(), pendingResize.depth());
             pendingResize = null;
-            dirty = true;
+            saveState.edited();
             afterResize();
             refresh();
         }
@@ -563,7 +565,7 @@ public final class ShapeEditorScreen extends Screen {
         if (draft.convertToCustom(limits())) {
             layer = 0;
             scroll = 0;
-            dirty = true;
+            saveState.edited();
             rebuildWidgets();
         } else {
             setStatus(Component.translatable("gui.shapeexcavator.to_custom.invalid"), ERROR);
@@ -633,7 +635,7 @@ public final class ShapeEditorScreen extends Screen {
         anchorMode = false;
         layer = 0;
         scroll = 0;
-        dirty = true;
+        saveState.edited();
         setStatus(Component.translatable("gui.shapeexcavator.preset.loaded", name.trim()), OK);
         rebuildWidgets();
     }
@@ -670,6 +672,7 @@ public final class ShapeEditorScreen extends Screen {
             return;
         }
         awaitingReply = true;
+        submittedGeneration = saveState.submit();
         closeAfterApply = showInWorld;
         if (showInWorld) {
             worldPreview = true;
@@ -701,12 +704,18 @@ public final class ShapeEditorScreen extends Screen {
         awaitingReply = false;
         if (payload.accepted()) {
             revision = payload.revision();
-            dirty = false;
-            setStatus(payload.message(), OK);
-            if (closeAfterApply) {
-                closeAfterApply = false;
-                closeNow();
-                return;
+            boolean allSaved = saveState.accepted(submittedGeneration);
+            boolean close = closeAfterApply;
+            closeAfterApply = false;
+            if (!allSaved) {
+                // Edits made while waiting are not part of the confirmed shape: keep them, stay open.
+                setStatus(Component.translatable("gui.shapeexcavator.status.applied_newer_unsaved"), WARN);
+            } else {
+                setStatus(payload.message(), OK);
+                if (close) {
+                    closeNow();
+                    return;
+                }
             }
         } else {
             closeAfterApply = false;
@@ -717,7 +726,7 @@ public final class ShapeEditorScreen extends Screen {
 
     @Override
     public void onClose() {
-        if (!dirty) {
+        if (!saveState.isDirty()) {
             closeNow();
             return;
         }

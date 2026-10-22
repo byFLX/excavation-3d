@@ -84,6 +84,7 @@
   "gui.shapeexcavator.status.connecting": "Connecting to the server…",
   "gui.shapeexcavator.status.damaged": "The stored shape could not be read - showing the default",
   "gui.shapeexcavator.status.applying": "Waiting for the server…",
+  "gui.shapeexcavator.status.applied_newer_unsaved": "Earlier version applied - your later changes are not applied yet",
   "gui.shapeexcavator.template.surface": "Surface (depth 1)",
   "gui.shapeexcavator.template.line": "Line",
   "gui.shapeexcavator.direction": "Direction",

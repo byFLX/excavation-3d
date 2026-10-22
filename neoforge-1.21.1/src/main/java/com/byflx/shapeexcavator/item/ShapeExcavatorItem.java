@@ -1,13 +1,16 @@
 package com.byflx.shapeexcavator.item;
 
 import com.byflx.shapeexcavator.client.ClientAccess;
+import com.byflx.shapeexcavator.excavation.ExcavationService;
 import com.byflx.shapeexcavator.registry.ModComponents;
 import com.byflx.shapeexcavator.registry.ModItems;
 import com.byflx.shapeexcavator.shape.ShapeLimits;
 import com.byflx.shapeexcavator.text.ShapeTexts;
 import java.util.List;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.player.Player;
@@ -38,6 +41,18 @@ public class ShapeExcavatorItem extends DiggerItem {
             return InteractionResultHolder.success(stack);
         }
         return InteractionResultHolder.pass(stack);
+    }
+
+    /**
+     * Called by the player's own {@code destroyBlock} after the break event was not cancelled. This is
+     * the success signal for the start block; the event alone may still be cancelled later.
+     */
+    @Override
+    public boolean onBlockStartBreak(ItemStack stack, BlockPos pos, Player player) {
+        if (player instanceof ServerPlayer serverPlayer) {
+            ExcavationService.onStartBlockBreakPassed(serverPlayer, pos);
+        }
+        return false;
     }
 
     @Override

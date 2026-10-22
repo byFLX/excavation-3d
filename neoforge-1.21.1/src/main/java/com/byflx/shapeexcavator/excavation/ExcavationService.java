@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -46,9 +45,12 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  *
  * <ul>
  *   <li>The start block's {@link BlockEvent.BreakEvent} (lowest priority, only if nobody cancelled
- *       it) records a pending start with the orientation frozen at that moment. The operation only
- *       starts at the end of the tick if the start block is really gone, so a cancelled or failed
- *       break never triggers extra mining.</li>
+ *       it so far) records an unconfirmed attempt with the orientation frozen at that moment. A
+ *       listener running after this one may still cancel the break, so the attempt is only
+ *       confirmed from the tool's {@code onBlockStartBreak} hook, which the player's own
+ *       {@code destroyBlock} calls after the event was not cancelled. The operation starts at the
+ *       end of the tick only if the attempt was confirmed and the start block is really gone; see
+ *       {@link StartGate}. Another player's break of the same block never starts it.</li>
  *   <li>Extra blocks go through the player's own {@code ServerPlayerGameMode.destroyBlock}, which
  *       fires the break event for protection mods and handles loot, experience and tool wear once
  *       per block. Breaks caused by the operation never start another operation.</li>
@@ -110,7 +112,7 @@ public final class ExcavationService {
 
     private static final Map<UUID, Boolean> BYPASS = new HashMap<>();
     private static final Map<UUID, ClickedFace> LAST_FACE = new HashMap<>();
-    private static final Map<UUID, Pending> PENDING = new HashMap<>();
+    private static final StartGate<Pending> STARTS = new StartGate<>();
     private static final Map<UUID, Operation> OPERATIONS = new LinkedHashMap<>();
     private static final Set<UUID> BREAKING_EXTRA = new HashSet<>();
     private static int rotation;
@@ -169,8 +171,25 @@ public final class ExcavationService {
         BlockPos pos = event.getPos().immutable();
         Orientation orientation = Orientation.orient(hitFace(player, level, pos), player.getDirection(),
                 Orientation.Mode.forType(config.type()));
-        PENDING.put(id, new Pending(level, pos, state, valid.shape().worldOffsets(orientation),
+        STARTS.attempt(id, pos, new Pending(level, pos, state, valid.shape().worldOffsets(orientation),
                 state.getDestroyProgress(player, level, pos), player.getInventory().selected, data.toolId()));
+    }
+
+    /**
+     * Called from {@link com.byflx.shapeexcavator.item.ShapeExcavatorItem#onBlockStartBreak} inside
+     * the player's own {@code destroyBlock}, i.e. only after the break event was not cancelled by
+     * any listener. The only gate left before the block is removed is the build restriction, which
+     * is checked here as well.
+     */
+    public static void onStartBlockBreakPassed(ServerPlayer player, BlockPos pos) {
+        UUID id = player.getUUID();
+        if (BREAKING_EXTRA.contains(id) || !STARTS.has(id)) {
+            return;
+        }
+        if (player.blockActionRestricted(player.serverLevel(), pos, player.gameMode.getGameModeForPlayer())) {
+            return;
+        }
+        STARTS.confirm(id, pos);
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
@@ -194,7 +213,7 @@ public final class ExcavationService {
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         UUID id = event.getEntity().getUUID();
         OPERATIONS.remove(id);
-        PENDING.remove(id);
+        STARTS.forget(id);
         BYPASS.remove(id);
         LAST_FACE.remove(id);
     }
@@ -211,23 +230,21 @@ public final class ExcavationService {
 
     public static void onServerStopped(ServerStoppedEvent event) {
         OPERATIONS.clear();
-        PENDING.clear();
+        STARTS.clear();
         BYPASS.clear();
         LAST_FACE.clear();
         BREAKING_EXTRA.clear();
     }
 
     private static void startPending(MinecraftServer server) {
-        for (Iterator<Map.Entry<UUID, Pending>> it = PENDING.entrySet().iterator(); it.hasNext(); ) {
-            Map.Entry<UUID, Pending> entry = it.next();
-            it.remove();
+        // Unconfirmed attempts (cancelled or refused breaks) and starts whose block is still there
+        // are dropped here, even if someone else removed the block in the meantime.
+        Map<UUID, Pending> started = STARTS.drain(
+                (pos, pending) -> pending.level().getBlockState(pos) != pending.state());
+        for (Map.Entry<UUID, Pending> entry : started.entrySet()) {
             Pending pending = entry.getValue();
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
             if (player == null || OPERATIONS.containsKey(entry.getKey())) {
-                continue;
-            }
-            if (pending.level().getBlockState(pending.pos()) == pending.state()) {
-                // The start block is still there: its break was refused or failed.
                 continue;
             }
             List<BlockPos> targets = new ArrayList<>(pending.offsets().size());
@@ -338,7 +355,7 @@ public final class ExcavationService {
     }
 
     private static void abort(UUID id, AbortReason reason) {
-        PENDING.remove(id);
+        STARTS.forget(id);
         Operation operation = OPERATIONS.remove(id);
         if (operation != null) {
             finish(operation, reason);

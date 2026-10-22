@@ -25,7 +25,7 @@ Test paths are relative to `neoforge-1.21.1/src/test/java/com/byflx/shapeexcavat
 | Camera rotation changes no shape data; shape rotation changes mask and anchor consistently | `PreviewCamera` holds only view state and is never passed to the generator; `editor/EditorDraftTest.transformButtonsChangeMaskAndAnchorTogether` | Automated for the data; dragging the 3D view in game – open |
 | Deselected custom cells appear neither in the preview nor in the server selection | `shape/CustomMaskTest.deselectedCellsAreNeverSelected`, `editor/CustomMaskDraftTest.deselectingRemovesCellsFromTheMask` | Automated (preview, world preview and server all use `ShapeGenerator`) |
 | Shrinking with data loss asks for confirmation; undo restores | `editor/CustomMaskDraftTest.shrinkingReportsLossAndUndoRestores`, `editor/EditorDraftTest.customSizeFieldsRequestResizeInsteadOfApplyingIt` | Automated for the model; confirmation button in game – open |
-| GUI scale and window resize keep the draft; Cancel keeps the active configuration | Widgets are rebuilt from `EditorDraft` in `ShapeEditorScreen.init()`; Cancel never sends a payload | In game – open |
+| GUI scale and window resize keep the draft; Cancel keeps the active configuration | Widgets are rebuilt from `EditorDraft` in `ShapeEditorScreen.init()`; Cancel never sends a payload. Edits made while an Apply is waiting for the server stay unsaved (discard confirmation, no auto-close): `editor/DraftSaveStateTest.editsMadeWhileAwaitingTheReplyStayUnsaved` | Save state automated; in game – open |
 | Restart, drop/pick up and hand-over keep the shape; two tools stay independent | `data/ShapeCodecsTest.componentSurvivesPersistence`, `componentSurvivesNetworkSync`, `twoToolsStayIndependent`, `brokenStoredShapeIsDroppedNotTheItem` | Automated for the codecs; in game – open |
 | Invalid revision, tool change and oversized network data are rejected | `net/EditSessions.apply` (session, slot, tool id, revision, rate, full regeneration); `data/ShapeCodecsTest.oversizedNetworkMaskIsRejectedBeforeAllocation`, `malformedNetworkShapesAreRejected` | Decoding automated; session checks need a server – open |
 
@@ -33,7 +33,7 @@ Test paths are relative to `neoforge-1.21.1/src/test/java/com/byflx/shapeexcavat
 
 | Plan §12 check | Evidence | Status |
 |---|---|---|
-| A refused or failed start block triggers no extra mining | `ExcavationService.onBreak` (lowest priority, not cancelled) + `startPending` (start block must be gone) | In game – open |
+| A refused or failed start block triggers no extra mining | `ExcavationService.onBreak` records an attempt; only `ShapeExcavatorItem.onBlockStartBreak` (called inside the player's own `destroyBlock` after the event was not cancelled) confirms it; `StartGate.drain` starts confirmed attempts whose block is gone. `excavation/StartGateTest.cancelledBreakFollowedByAnotherPlayersRemovalStartsNothing`, `unconfirmedAttemptNeverStartsEvenIfTheBlockIsGone` | Start decision automated; in game / Game Test – open |
 | Protected positions, machines, wrong tool tier and unloaded chunks stay untouched | `ExcavationService.check` (+ the real `destroyBlock` path, which fires the break event for protection mods) | In game / Game Test – open |
 | Start and extra blocks give loot, XP and wear at most once | Extra blocks use `ServerPlayerGameMode.destroyBlock` once each; the start block is excluded from the targets | In game – open |
 | Extra mining starts no recursive cascade | `BREAKING_EXTRA` guard in `ExcavationService` | In game – open |
@@ -50,4 +50,4 @@ None of these have been run:
 3. A claim/protection mod: protected blocks are skipped and reported.
 4. GUI scale 1–4 and small windows: no overlap, scrolling parameter area, draft kept.
 5. A shader pack: editor preview and world preview outlines still visible.
-6. Game Tests for break events, loot/XP/wear once, unloaded chunks (plan §12, last paragraph). Not written yet.
+6. Game Tests for successful versus rejected starts, protection, unloaded chunks, recursion and loot/XP/wear at most once (plan §12, last paragraph). Not written yet: they need test structure templates and a `gameTestServer` run, and the current build gate runs only `test build`. The start decision is covered by `excavation/StartGateTest`; the world-level behaviour is not.
