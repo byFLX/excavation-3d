@@ -26,9 +26,20 @@ public final class PreviewScale {
 
     /** Keeps {@code current} while the shape fits; otherwise the scale at which it fits again. */
     public static float next(float current, int panelWidth, int panelHeight, int width, int height, int depth) {
+        return next(current, 1.0F, panelWidth, panelHeight, width, height, depth);
+    }
+
+    /**
+     * Like {@link #next(float, int, int, int, int, int)}, but decides on the displayed scale
+     * {@code current * zoom}: after the user zoomed out, a shape that still fits on screen keeps its
+     * scale. A deliberate zoom-in is not counted, so it never makes a resize shrink the scale.
+     */
+    public static float next(float current, float zoom, int panelWidth, int panelHeight, int width, int height,
+            int depth) {
         if (!(current > 0.0F)) {
             return initial(panelWidth, panelHeight, width, height, depth);
         }
-        return Math.min(current, fit(panelWidth, panelHeight, width, height, depth));
+        float userZoomOut = zoom > 0.0F ? Math.min(zoom, 1.0F) : 1.0F;
+        return Math.min(current, fit(panelWidth, panelHeight, width, height, depth) / userZoomOut);
     }
 }

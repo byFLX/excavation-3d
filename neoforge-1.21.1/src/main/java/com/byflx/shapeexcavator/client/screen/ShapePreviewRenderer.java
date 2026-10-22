@@ -65,6 +65,12 @@ public final class ShapePreviewRenderer {
     private int quads;
     /** Pixels per block before the user's zoom; 0 until the first frame or after a reset. */
     private float baseScale;
+    /** Shape and panel size {@link #baseScale} was last decided for. */
+    private int scaledWidth;
+    private int scaledHeight;
+    private int scaledDepth;
+    private int scaledPanelWidth;
+    private int scaledPanelHeight;
 
     private GeneratedShape highlightShape;
     private ShapeDiff highlight = ShapeDiff.NONE;
@@ -101,7 +107,16 @@ public final class ShapePreviewRenderer {
         int w = shape.width();
         int h = shape.height();
         int d = shape.depth();
-        baseScale = PreviewScale.next(baseScale, x1 - x0, y1 - y0, w, h, d);
+        // Only a new shape size or panel size may change the block scale; camera zoom never does.
+        if (!(baseScale > 0.0F) || w != scaledWidth || h != scaledHeight || d != scaledDepth
+                || x1 - x0 != scaledPanelWidth || y1 - y0 != scaledPanelHeight) {
+            baseScale = PreviewScale.next(baseScale, camera.zoom(), x1 - x0, y1 - y0, w, h, d);
+            scaledWidth = w;
+            scaledHeight = h;
+            scaledDepth = d;
+            scaledPanelWidth = x1 - x0;
+            scaledPanelHeight = y1 - y0;
+        }
         float scale = baseScale * camera.zoom();
 
         graphics.enableScissor(x0, y0, x1, y1);
