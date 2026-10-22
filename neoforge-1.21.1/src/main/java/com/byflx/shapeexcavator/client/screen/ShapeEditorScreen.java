@@ -127,6 +127,12 @@ public final class ShapeEditorScreen extends Screen {
     private int previewY0;
     private int previewX1;
     private int previewY1;
+    /** The 3D scene inside the preview, between the caption strip on top and the hint strip below. */
+    private int sceneY0;
+    private int sceneY1;
+    private int captionY;
+    private int captionWidth;
+    private int hintY;
     private int statusY;
     private int summaryY;
     /** The summary ends left of this x, where the world preview checkbox starts. */
@@ -369,6 +375,8 @@ public final class ShapeEditorScreen extends Screen {
         }
         int x = previewX1 - 2 - ICON_SIZE;
         int y = previewY0 + 2;
+        int buttonsX = stairLike ? x - 2 * (ICON_SIZE + 2) : x - (ICON_SIZE + 2);
+        layoutCaptions(buttonsX, stairLike);
         previewWidget(IconButton.glyph(x, y, ICON_SIZE, Component.translatable("gui.shapeexcavator.rotate"), "↻", b -> {
             draft.rotateClockwise();
             changed();
@@ -387,6 +395,53 @@ public final class ShapeEditorScreen extends Screen {
                     });
             result.setSelected(resultView);
             previewWidget(result);
+        }
+    }
+
+    /** The captions the preview can show; the strip is sized for the longest, so it never jumps. */
+    private List<Component> previewCaptions(boolean stairLike) {
+        List<Component> captions = new ArrayList<>(3);
+        captions.add(Component.translatable("gui.shapeexcavator.preview.selection"));
+        captions.add(Component.translatable("gui.shapeexcavator.last_valid"));
+        if (stairLike) {
+            captions.add(Component.translatable("gui.shapeexcavator.view.result.label"));
+        }
+        return captions;
+    }
+
+    /**
+     * Gives the captions their own strips, so neither the icon buttons nor the shape cover them. A
+     * caption sits beside the buttons when every caption fits there, otherwise below them, wrapped
+     * to the panel width. The camera hint wraps upwards from the bottom edge.
+     */
+    private void layoutCaptions(int buttonsX, boolean stairLike) {
+        int textX = previewX0 + 4;
+        int fullWidth = Math.max(20, previewX1 - 4 - textX);
+        int besideWidth = buttonsX - 4 - textX;
+        List<Component> captions = previewCaptions(stairLike);
+        int widest = 0;
+        for (Component caption : captions) {
+            widest = Math.max(widest, font.width(caption));
+        }
+        boolean beside = widest <= besideWidth;
+        captionWidth = beside ? besideWidth : fullWidth;
+        captionY = beside ? previewY0 + 6 : previewY0 + 2 + ICON_SIZE + 3;
+        int lines = 1;
+        for (Component caption : captions) {
+            lines = Math.max(lines, font.split(caption, captionWidth).size());
+        }
+        sceneY0 = Math.max(previewY0 + 2 + ICON_SIZE + 2, captionY + lines * font.lineHeight + 2);
+        int hintLines = Math.max(1, font.split(Component.translatable("gui.shapeexcavator.preview.controls"),
+                fullWidth).size());
+        hintY = previewY1 - 2 - hintLines * font.lineHeight;
+        // On a tiny panel the scene keeps a minimum height rather than vanishing.
+        sceneY1 = Math.max(sceneY0 + 20, hintY - 2);
+    }
+
+    private void drawWrapped(GuiGraphics graphics, Component text, int y, int maxWidth, int color) {
+        for (FormattedCharSequence line : font.split(text, maxWidth)) {
+            graphics.drawString(font, line, previewX0 + 4, y, color);
+            y += font.lineHeight;
         }
     }
 
@@ -1149,22 +1204,23 @@ public final class ShapeEditorScreen extends Screen {
         GeneratedShape shown = current != null ? current : lastValid;
         boolean stairLike = draft.type() == ShapeType.STAIR || draft.type() == ShapeType.CORRIDOR;
         if (shown != null) {
-            preview.render(graphics, font, previewX0 + 1, previewY0 + 1, previewX1 - 1, previewY1 - 1, shown, camera,
+            // Only the scene between the caption and hint strips, so the shape and its labels never cover them.
+            preview.render(graphics, font, previewX0 + 1, sceneY0, previewX1 - 1, sceneY1, shown, camera,
                     resultView && stairLike);
         }
         graphics.enableScissor(previewX0 + 1, previewY0 + 1, previewX1 - 1, previewY1 - 1);
         if (current == null && lastValid != null) {
-            graphics.drawString(font, Component.translatable("gui.shapeexcavator.last_valid"), previewX0 + 4,
-                    previewY0 + 4, WARN);
+            drawWrapped(graphics, Component.translatable("gui.shapeexcavator.last_valid"), captionY, captionWidth,
+                    WARN);
         } else if (resultView && stairLike) {
-            graphics.drawString(font, Component.translatable("gui.shapeexcavator.view.result.label"), previewX0 + 4,
-                    previewY0 + 4, WARN);
+            drawWrapped(graphics, Component.translatable("gui.shapeexcavator.view.result.label"), captionY,
+                    captionWidth, WARN);
         } else {
-            graphics.drawString(font, Component.translatable("gui.shapeexcavator.preview.selection"), previewX0 + 4,
-                    previewY0 + 4, MUTED);
+            drawWrapped(graphics, Component.translatable("gui.shapeexcavator.preview.selection"), captionY,
+                    captionWidth, MUTED);
         }
-        graphics.drawString(font, Component.translatable("gui.shapeexcavator.preview.controls"), previewX0 + 4,
-                previewY1 - 11, MUTED);
+        drawWrapped(graphics, Component.translatable("gui.shapeexcavator.preview.controls"), hintY,
+                Math.max(20, previewX1 - previewX0 - 8), MUTED);
         graphics.disableScissor();
         for (AbstractWidget widget : previewWidgets) {
             widget.render(graphics, mouseX, mouseY, partialTick);

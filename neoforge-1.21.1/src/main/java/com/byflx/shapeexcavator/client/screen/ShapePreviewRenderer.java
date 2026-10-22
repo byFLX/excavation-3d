@@ -53,10 +53,8 @@ public final class ShapePreviewRenderer {
     /** Grid cells drawn beyond the footprint on every side. */
     private static final int GRID_EXTRA = 2;
     private static final long HIGHLIGHT_MS = 900L;
-    /** Space at the top of the panel kept free for its caption and icon buttons. */
-    private static final int LABEL_TOP_RESERVE = 14;
-    /** Space at the bottom of the panel kept free for the camera hint line. */
-    private static final int LABEL_BOTTOM_RESERVE = 12;
+    /** Distance of the labels from the scene edges; the caller keeps captions and buttons outside the scene. */
+    private static final int LABEL_PADDING = 2;
     // Brightness per face: -x, +x, -y, +y, -z (front), +z (back).
     private static final float[] SHADE = {0.78F, 0.78F, 0.5F, 1.0F, 0.9F, 0.6F};
 
@@ -88,6 +86,9 @@ public final class ShapePreviewRenderer {
     }
 
     /**
+     * Draws into the scene rectangle {@code x0..x1, y0..y1}; the caller keeps captions and buttons
+     * outside it.
+     *
      * @param resultView draw the schematic "what remains" view for stairs instead of the selection
      */
     public void render(GuiGraphics graphics, Font font, int x0, int y0, int x1, int y1, GeneratedShape shape,
@@ -120,8 +121,8 @@ public final class ShapePreviewRenderer {
         for (PendingLabel label : pending) {
             anchors.add(label.anchor());
         }
-        LabelPlacement.Rect panel = new LabelPlacement.Rect(x0 + 2, y0 + LABEL_TOP_RESERVE, x1 - 2,
-                y1 - LABEL_BOTTOM_RESERVE);
+        LabelPlacement.Rect panel = new LabelPlacement.Rect(x0 + LABEL_PADDING, y0 + LABEL_PADDING,
+                x1 - LABEL_PADDING, y1 - LABEL_PADDING);
         LabelPlacement.Layout layout = LabelPlacement.layout(anchors, projectedBox(matrix, w, h, d), panel);
         // Without a free side the labels sit in a strip at the bottom; the shape is clipped above it.
         if (layout.clipsShape()) {
