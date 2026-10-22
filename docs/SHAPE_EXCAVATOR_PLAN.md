@@ -1,13 +1,13 @@
 # Entwicklungsplan: Shape Excavator
 
 **Zielplattform:** Minecraft 1.21.1 / NeoForge 21.1.x  
-**Status:** Umsetzungsvorschlag, noch keine implementierte oder geprüfte Mod.  
+**Status:** Etappen 1–5 umgesetzt (Lauf #25, 335b569). Korrektur 2026-10-22: Die Form hängt an normalen Werkzeugen, es gibt kein eigenes Item (siehe Abschnitt 2a).  
 **Arbeitstitel:** Shape Excavator; die Verfügbarkeit des Namens wurde nicht geprüft.  
 **Referenz:** Die vom Nutzer gezeigte, drehbare 3D-Vorschau seiner eigenen Mod. Deren Quellcode wurde für diesen Plan nicht eingesehen.
 
 ## 1. Ziel und verbindlicher Umfang
 
-Eine eigenständige Mod mit einem Handwerkzeug, dessen Abbauform direkt im Spiel eingestellt wird. Der Spieler soll nicht erst eine Konfigurationsdatei bearbeiten oder sich eine Form anhand von Zahlen vorstellen müssen.
+Eine eigenständige Mod, mit der normale Abbauwerkzeuge (Spitzhacke, Schaufel, Axt, auch Werkzeuge anderer Mods) eine im Spiel einstellbare Abbauform bekommen. Es gibt **kein eigenes Werkzeug-Item**. Der Spieler soll nicht erst eine Konfigurationsdatei bearbeiten oder sich eine Form anhand von Zahlen vorstellen müssen.
 
 Der vollständige erste Funktionsumfang umfasst:
 
@@ -25,13 +25,23 @@ Eine Quader-only-Version ist ein Zwischenstand, nicht die Erfüllung des gesamte
 
 ## 2. Bedienungsablauf
 
-Der Spieler hält das Werkzeug in der Haupthand. Ein Rechtsklick in die Luft öffnet die Konfiguration. Eine frei belegbare Konfigurationstaste öffnet sie ebenfalls, auch wenn ein Block anvisiert wird. Gewöhnliche Interaktionen mit Kisten oder Maschinen sollen nicht pauschal abgefangen werden.
+Der Spieler hält ein geeignetes Werkzeug (Abschnitt 2a) in der Haupthand. Eine frei belegbare Konfigurationstaste (Standard `V`) öffnet die Konfiguration, auch wenn ein Block anvisiert wird. Rechtsklicks werden **nicht** abgefangen: Fremde Werkzeuge haben oft eigene Rechtsklick-Fähigkeiten, und Schaufel/Axt nutzen Rechtsklick für Pfade und Entrinden. Gewöhnliche Interaktionen mit Kisten oder Maschinen bleiben unberührt.
 
 Der Spieler wählt eine Form, gibt Zahlen ein und sieht unmittelbar die gültige neue Form. Anschließend speichert er mit **Übernehmen** oder **Übernehmen & in Welt zeigen**. Erst die Bestätigung des Servers aktiviert die neue Einstellung. Der zweite Knopf aktiviert zusätzlich die Weltvorschau und schließt nach erfolgreicher Bestätigung den Editor.
 
 Das normale Abbauen des anvisierten Startblocks löst den Formabbau aus. Die Weltvorschau allein darf niemals etwas abbauen. Eine belegbare Einzelblock-Taste, standardmäßig Schleichen, umgeht die Form vorübergehend. Das muss im kleinen Werkzeug-Hinweis erkennbar sein.
 
 Änderungen im Editor sind zunächst ein Entwurf. Abbrechen verändert das Werkzeug nicht. Beim Schließen mit ungespeicherten Änderungen erscheint eine kurze Verwerfen-Abfrage. Fenstergröße und GUI-Skalierung dürfen den Entwurf nicht zurücksetzen.
+
+## 2a. Geeignete Werkzeuge (Korrektur 2026-10-22)
+
+- Geeignet ist jedes Item im Tag `shapeexcavator:shape_tools`. Er enthält standardmäßig `#minecraft:pickaxes`, `#minecraft:shovels` und `#minecraft:axes`. Werkzeuge anderer Mods sind damit automatisch dabei, wenn sie in diesen Tags stehen; Datapacks und Modpacks können den Tag erweitern oder Werkzeuge entfernen.
+- Ein Werkzeug ohne gespeicherte Form verhält sich exakt wie in Vanilla bzw. wie von seiner Mod vorgesehen. Erst eine im Editor übernommene Form (Data Component am ItemStack) aktiviert den Formabbau für genau dieses Werkzeug.
+- Abbaueignung, Abbaustufe, Verzauberungen und Haltbarkeit kommen vom jeweiligen Werkzeug selbst. Zusatzblöcke, für die das Werkzeug nicht das richtige ist (z. B. Stein mit der Schaufel), werden übersprungen und gemeldet.
+- Die Form bleibt beim Reparieren im Amboss, Verzaubern, Umbenennen und Schmieden (Netherit-Upgrade) erhalten, soweit Vanilla die Komponenten mitnimmt; das wird getestet. Im Editor gibt es „Form entfernen“, damit ein Werkzeug wieder normal abbaut.
+- Der Werkzeug-Hinweis (Tooltip) erscheint nur bei Werkzeugen mit Form: aktive Form, Einzelblock-Taste, Editor-Taste.
+- Entfernt werden das eigene Item `shapeexcavator:shape_excavator`, sein Rezept, der Eintrag im Kreativ-Inventar und die Einträge in den Verzauberbarkeits-Tags. Die Mod ist unveröffentlicht, eine Migration bestehender Items ist nicht nötig.
+- Die Bindung der Editor-Sitzung an Spieler, Inventarplatz und ItemStack bleibt; geprüft wird zusätzlich, dass das Item noch im Tag `shapeexcavator:shape_tools` ist.
 
 ## 3. Bildschirmaufteilung
 
@@ -212,7 +222,7 @@ Reihenfolge: nahe Tiefenebenen zuerst, innerhalb einer Ebene deterministisch. Ei
 | 1: Geometrischer Kern | Konfigurationsmodell, Validierung, alle Generatoren, Anker und Transformationen | Reine automatisierte Geometrietests bestehen |
 | 2: Bedienbarer Editor | Screen, echte Zahlenfelder, 3D-Vorschau, Kamera, alle parametrischen Formen | Freie Zahlen und Formwechsel sind visuell korrekt; noch kein Weltabbau nötig |
 | 3: Custom und Vorlagen | Ebeneneditor, Undo/Redo, Umwandlung aus Vorlagen, sichere Größenänderung | Eigene Formen sind zeichnbar, speicherbar und wiederherstellbar |
-| 4: Werkzeug und Synchronisierung | Registrierung, Data Component, Editor-Sitzung, bestätigte Serverübernahme, Weltvorschau | Zwei Werkzeuge bleiben unabhängig; Server lehnt manipulierte Werte ab |
+| 4: Werkzeug und Synchronisierung | Werkzeug-Tag (Abschnitt 2a), Data Component an normalen Werkzeugen, Editor-Sitzung, bestätigte Serverübernahme, Weltvorschau | Zwei Werkzeuge bleiben unabhängig; Werkzeuge ohne Form verhalten sich wie Vanilla; Server lehnt manipulierte Werte ab |
 | 5: Sicherer Abbau | Erfolgreicher Startblock als Auslöser, Spieler-Abbaupfad, Schutz, Verschleiß, Budgets | Ausgewählte erlaubte Blöcke werden genau einmal verarbeitet |
 | 6: Integration und Freigabe | Dedicated Server, Schutz-/Modpacktests, GUI-Skalierung, Shader-/Rendererprüfung | Dokumentierte Abnahmematrix ohne ungeklärte Fehler |
 
