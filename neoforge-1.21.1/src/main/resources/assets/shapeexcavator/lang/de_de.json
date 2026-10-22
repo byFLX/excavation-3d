@@ -77,6 +77,7 @@
   "skip.shapeexcavator.liquid": "Flüssigkeiten: %s",
   "skip.shapeexcavator.unbreakable": "unzerstörbar: %s",
   "skip.shapeexcavator.protected": "geschützt: %s",
+  "skip.shapeexcavator.refused": "Abbau verweigert: %s",
   "skip.shapeexcavator.wrong_tool": "falsche Werkzeugstufe: %s",
   "skip.shapeexcavator.harder_than_start": "härter als der Startblock: %s",
 

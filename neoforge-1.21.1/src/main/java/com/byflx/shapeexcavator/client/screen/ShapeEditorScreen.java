@@ -107,6 +107,7 @@ public final class ShapeEditorScreen extends Screen {
     private final Map<String, EditBox> fieldBoxes = new HashMap<>();
     private EditBox layerBox;
     private EditBox presetName;
+    private CycleButton<Boolean> worldPreviewButton;
     private Button applyButton;
     private Button applyShowButton;
     private Button undoButton;
@@ -399,7 +400,7 @@ public final class ShapeEditorScreen extends Screen {
         addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> onClose())
                 .bounds(x, y, w, 20).build());
         x += w + gap;
-        addRenderableWidget(CycleButton.onOffBuilder(worldPreview)
+        worldPreviewButton = addRenderableWidget(CycleButton.onOffBuilder(worldPreview)
                 .create(x, y, w, 20, Component.translatable("gui.shapeexcavator.world_preview"), (button, value) -> {
                     worldPreview = value;
                     saveState.edited();
@@ -675,7 +676,11 @@ public final class ShapeEditorScreen extends Screen {
         submittedGeneration = saveState.submit();
         closeAfterApply = showInWorld;
         if (showInWorld) {
+            // Draft value and toggle change together, so the editor never shows OFF for an ON request.
             worldPreview = true;
+            if (worldPreviewButton != null) {
+                worldPreviewButton.setValue(true);
+            }
         }
         setStatus(Component.translatable("gui.shapeexcavator.status.applying"), MUTED);
         PacketDistributor.sendToServer(new ApplyShapePayload(sessionId, slot, revision, evaluation.config(),

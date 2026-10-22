@@ -60,14 +60,16 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  *       within the same tick.</li>
  *   <li>Extra blocks go through the player's own {@code ServerPlayerGameMode.destroyBlock}, which
  *       fires the break event for protection mods and handles loot, experience and tool wear once
- *       per block. Breaks caused by the operation never start another operation.</li>
+ *       per block. A block only counts as mined if it is really gone afterwards
+ *       ({@link ExtraBreak}). Breaks caused by the operation never start another operation.</li>
  *   <li>Positions come only from the stored, server-validated shape; the client never sends
  *       coordinates. Each position is re-checked right before it is mined.</li>
  * </ul>
  */
 public final class ExcavationService {
     public enum SkipReason {
-        AIR, OUTSIDE_WORLD, UNLOADED, BLOCK_ENTITY, LIQUID, UNBREAKABLE, PROTECTED, WRONG_TOOL, HARDER_THAN_START
+        AIR, OUTSIDE_WORLD, UNLOADED, BLOCK_ENTITY, LIQUID, UNBREAKABLE, PROTECTED, REFUSED, WRONG_TOOL,
+        HARDER_THAN_START
     }
 
     public enum AbortReason {
@@ -240,7 +242,8 @@ public final class ExcavationService {
     private static void startPending(MinecraftServer server) {
         // Unconfirmed attempts (cancelled event, refused removal, creative) are dropped here even if
         // someone else removed the block in the meantime, as are starts whose block came back.
-        Map<UUID, Pending> started = STARTS.drain((pos, pending) -> startBlockRemoved(pending));
+        Map<UUID, Pending> started = STARTS.drain(
+                (pos, pending) -> blockRemoved(pending.level(), pending.pos(), pending.state()));
         for (Map.Entry<UUID, Pending> entry : started.entrySet()) {
             Pending pending = entry.getValue();
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
@@ -260,13 +263,13 @@ public final class ExcavationService {
     }
 
     /**
-     * The start block is gone: the position holds what the removal leaves behind (air, or the
-     * block's own fluid when waterlogged), or a fluid such as the water ice turns into. A changed
-     * property or a different solid block does not count.
+     * The block is gone: the position holds what the removal leaves behind (air, or the block's
+     * own fluid when waterlogged), or a fluid such as the water ice turns into. A changed property
+     * or a different solid block does not count.
      */
-    private static boolean startBlockRemoved(Pending pending) {
-        BlockState now = pending.level().getBlockState(pending.pos());
-        return now == pending.state().getFluidState().createLegacyBlock() || now.isAir()
+    private static boolean blockRemoved(ServerLevel level, BlockPos pos, BlockState before) {
+        BlockState now = level.getBlockState(pos);
+        return now == before.getFluidState().createLegacyBlock() || now.isAir()
                 || now.getBlock() instanceof LiquidBlock;
     }
 
@@ -284,6 +287,7 @@ public final class ExcavationService {
                 continue;
             }
             UUID id = operation.player.getUUID();
+            BlockState before = operation.level.getBlockState(pos);
             boolean destroyed;
             BREAKING_EXTRA.add(id);
             try {
@@ -291,10 +295,11 @@ public final class ExcavationService {
             } finally {
                 BREAKING_EXTRA.remove(id);
             }
-            if (destroyed) {
-                operation.mined++;
-            } else {
-                operation.skipped.merge(SkipReason.PROTECTED, 1, Integer::sum);
+            // destroyBlock also returns true when the block refused its removal: check the world.
+            switch (ExtraBreak.of(destroyed, blockRemoved(operation.level, pos, before))) {
+                case MINED -> operation.mined++;
+                case PROTECTED -> operation.skipped.merge(SkipReason.PROTECTED, 1, Integer::sum);
+                case REFUSED -> operation.skipped.merge(SkipReason.REFUSED, 1, Integer::sum);
             }
         }
         if (operation.remaining() == 0) {
