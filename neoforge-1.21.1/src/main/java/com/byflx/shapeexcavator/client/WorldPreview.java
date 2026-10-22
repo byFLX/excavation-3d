@@ -1,8 +1,7 @@
 package com.byflx.shapeexcavator.client;
 
 import com.byflx.shapeexcavator.data.ToolShapeData;
-import com.byflx.shapeexcavator.registry.ModComponents;
-import com.byflx.shapeexcavator.registry.ModItems;
+import com.byflx.shapeexcavator.registry.ModTags;
 import com.byflx.shapeexcavator.shape.Offset;
 import com.byflx.shapeexcavator.shape.Orientation;
 import com.byflx.shapeexcavator.shape.ShapeConfig;
@@ -100,7 +99,7 @@ public final class WorldPreview {
             return;
         }
         ItemStack tool = player.getMainHandItem();
-        ToolShapeData data = tool.is(ModItems.SHAPE_EXCAVATOR.get()) ? tool.get(ModComponents.TOOL_SHAPE.get()) : null;
+        ToolShapeData data = ModTags.shapeOf(tool);
         if (data == null || !data.worldPreview() || data.config().isEmpty()
                 || !(minecraft.hitResult instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) {
             return;

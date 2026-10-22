@@ -3,7 +3,7 @@ package com.byflx.shapeexcavator.net;
 import com.byflx.shapeexcavator.config.ServerConfig;
 import com.byflx.shapeexcavator.data.ToolShapeData;
 import com.byflx.shapeexcavator.registry.ModComponents;
-import com.byflx.shapeexcavator.registry.ModItems;
+import com.byflx.shapeexcavator.registry.ModTags;
 import com.byflx.shapeexcavator.shape.ShapeConfig;
 import com.byflx.shapeexcavator.shape.ShapeGenerator;
 import com.byflx.shapeexcavator.shape.ShapeLimits;
@@ -19,19 +19,25 @@ import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * Server-side editor sessions (plan §9). A session binds the real sender to one tool (by its
- * {@link ToolShapeData#toolId()}) in one hotbar slot. "Apply" is accepted only for that player,
- * slot and tool at the expected revision, and only if the shape is valid under the server limits.
- * All methods run on the server main thread.
+ * Server-side editor sessions (plan §2a, §9). A session binds the real sender to one hotbar slot,
+ * the stack instance in it and the {@link ToolShapeData#toolId()} of its shape (null while the tool
+ * has none). "Apply" and "Remove shape" are accepted only if {@link SessionBinding} accepts that
+ * binding at the expected revision and the item is still in {@code shapeexcavator:shape_tools};
+ * Apply also needs a shape that is valid under the server limits. Opening the editor never writes to
+ * the tool, so a tool without a shape stays a vanilla stack until the first accepted Apply. All
+ * methods run on the server main thread.
  */
 public final class EditSessions {
-    /** Minimum ticks between two apply requests of one player. */
+    /** Minimum ticks between two apply or remove requests of one player. */
     static final int MIN_TICKS_BETWEEN_APPLIES = 5;
     /** Begin requests per player and window; reopening the editor a few times stays allowed. */
     static final int MAX_BEGINS_PER_WINDOW = 4;
     static final int BEGIN_WINDOW_TICKS = 40;
 
-    private record Session(int id, int slot, UUID toolId) {
+    private record Session(int id, int slot, ItemStack stack, UUID toolId) {
+        Session withToolId(UUID newToolId) {
+            return new Session(id, slot, stack, newToolId);
+        }
     }
 
     private static final Map<UUID, Session> SESSIONS = new HashMap<>();
@@ -42,8 +48,8 @@ public final class EditSessions {
     }
 
     static void begin(ServerPlayer player, int requestId, int slot) {
-        // Flooding is dropped before any session, tool data or reply is created; the client asks
-        // again after SessionHandshake.RETRY_TICKS, which is longer than the window.
+        // Flooding is dropped before any session or reply is created; the client asks again after
+        // SessionHandshake.RETRY_TICKS, which is longer than the window.
         if (!BEGINS.tryAcquire(player.getUUID(), player.server.getTickCount())) {
             return;
         }
@@ -56,52 +62,54 @@ public final class EditSessions {
             return;
         }
         ToolShapeData data = stack.get(ModComponents.TOOL_SHAPE.get());
-        if (data == null) {
-            data = ToolShapeData.fresh();
-            stack.set(ModComponents.TOOL_SHAPE.get(), data);
-        }
         int id = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
-        SESSIONS.put(player.getUUID(), new Session(id, slot, data.toolId()));
-        PacketDistributor.sendToPlayer(player, new EditSessionPayload(requestId, id, true, data.revision(), limits.maxAxis(),
-                limits.maxSelected(), Component.empty()));
+        SESSIONS.put(player.getUUID(), new Session(id, slot, stack, data == null ? null : data.toolId()));
+        PacketDistributor.sendToPlayer(player, new EditSessionPayload(requestId, id, true,
+                data == null ? 0L : data.revision(), limits.maxAxis(), limits.maxSelected(), Component.empty()));
     }
 
     static void apply(ServerPlayer player, ApplyShapePayload request) {
-        Session session = SESSIONS.get(player.getUUID());
-        if (session == null || session.id() != request.sessionId()) {
-            reject(player, request, "session");
+        Session session = openSession(player, request.sessionId(), request.expectedRevision());
+        if (session == null) {
             return;
         }
-        int now = player.server.getTickCount();
-        Integer last = LAST_APPLY_TICK.get(player.getUUID());
-        if (last != null && now - last < MIN_TICKS_BETWEEN_APPLIES) {
-            reject(player, request, "rate");
+        ItemStack stack = boundTool(player, session, request.sessionId(), request.slot(), request.expectedRevision());
+        if (stack == null) {
             return;
         }
-        LAST_APPLY_TICK.put(player.getUUID(), now);
-
-        ItemStack stack = request.slot() == session.slot() ? toolInSelectedSlot(player, session.slot()) : null;
-        ToolShapeData data = stack == null ? null : stack.get(ModComponents.TOOL_SHAPE.get());
-        if (data == null || !data.toolId().equals(session.toolId())) {
-            reject(player, request, "tool_changed");
-            return;
-        }
-        if (data.revision() != request.expectedRevision()) {
-            reject(player, request, "revision");
-            return;
-        }
+        ToolShapeData data = stack.get(ModComponents.TOOL_SHAPE.get());
+        long current = data == null ? 0L : data.revision();
         ShapeGenerator.Result result = ShapeGenerator.generate(request.config(), ServerConfig.limits());
         if (result instanceof ShapeGenerator.Invalid invalid) {
-            PacketDistributor.sendToPlayer(player, new ApplyResultPayload(request.sessionId(), false, data.revision(),
+            PacketDistributor.sendToPlayer(player, new ApplyResultPayload(request.sessionId(), false, current,
                     Component.translatable("message.shapeexcavator.reject.invalid",
                             ShapeTexts.issue(invalid.issues().get(0)))));
             return;
         }
-        long revision = data.revision() + 1;
+        // The tool gets its identity with its first accepted shape.
+        ToolShapeData base = data != null ? data : ToolShapeData.fresh();
+        long revision = current + 1;
         ShapeConfig accepted = request.config().withRevision(revision);
-        stack.set(ModComponents.TOOL_SHAPE.get(), data.withConfig(accepted, revision, request.worldPreview()));
+        stack.set(ModComponents.TOOL_SHAPE.get(), base.withConfig(accepted, revision, request.worldPreview()));
+        SESSIONS.put(player.getUUID(), session.withToolId(base.toolId()));
         PacketDistributor.sendToPlayer(player, new ApplyResultPayload(request.sessionId(), true, revision,
                 Component.translatable("message.shapeexcavator.applied")));
+    }
+
+    static void remove(ServerPlayer player, RemoveShapePayload request) {
+        Session session = openSession(player, request.sessionId(), request.expectedRevision());
+        if (session == null) {
+            return;
+        }
+        ItemStack stack = boundTool(player, session, request.sessionId(), request.slot(), request.expectedRevision());
+        if (stack == null) {
+            return;
+        }
+        // The whole component goes, also a damaged one: the tool is a vanilla stack again.
+        stack.remove(ModComponents.TOOL_SHAPE.get());
+        SESSIONS.put(player.getUUID(), session.withToolId(null));
+        PacketDistributor.sendToPlayer(player, new ApplyResultPayload(request.sessionId(), true, 0L,
+                Component.translatable("message.shapeexcavator.removed")));
     }
 
     static void end(UUID player) {
@@ -116,19 +124,53 @@ public final class EditSessions {
         BEGINS.clear();
     }
 
-    /** The tool in {@code slot}, if that is the selected hotbar slot and holds the tool; otherwise null. */
+    /** The player's session with that id, within the apply rate; otherwise rejects and returns null. */
+    private static Session openSession(ServerPlayer player, int sessionId, long expectedRevision) {
+        Session session = SESSIONS.get(player.getUUID());
+        if (session == null || session.id() != sessionId) {
+            reject(player, sessionId, expectedRevision, "session");
+            return null;
+        }
+        int now = player.server.getTickCount();
+        Integer last = LAST_APPLY_TICK.get(player.getUUID());
+        if (last != null && now - last < MIN_TICKS_BETWEEN_APPLIES) {
+            reject(player, sessionId, expectedRevision, "rate");
+            return null;
+        }
+        LAST_APPLY_TICK.put(player.getUUID(), now);
+        return session;
+    }
+
+    /** The bound tool if {@link SessionBinding} accepts the request; otherwise rejects and returns null. */
+    private static ItemStack boundTool(ServerPlayer player, Session session, int sessionId, int slot,
+            long expectedRevision) {
+        Inventory inventory = player.getInventory();
+        boolean slotSelected = slot == session.slot() && Inventory.isHotbarSlot(slot) && inventory.selected == slot;
+        ItemStack stack = slotSelected ? inventory.getItem(slot) : ItemStack.EMPTY;
+        ToolShapeData data = stack.get(ModComponents.TOOL_SHAPE.get());
+        SessionBinding binding = SessionBinding.check(slotSelected, stack == session.stack(),
+                stack.is(ModTags.SHAPE_TOOLS), session.toolId(), data == null ? null : data.toolId(),
+                expectedRevision, data == null ? 0L : data.revision());
+        if (binding != SessionBinding.ACCEPT) {
+            reject(player, sessionId, expectedRevision, binding.rejectKey());
+            return null;
+        }
+        return stack;
+    }
+
+    /** The eligible tool in {@code slot}, if that is the selected hotbar slot; otherwise null. */
     private static ItemStack toolInSelectedSlot(ServerPlayer player, int slot) {
         Inventory inventory = player.getInventory();
         if (!Inventory.isHotbarSlot(slot) || inventory.selected != slot) {
             return null;
         }
         ItemStack stack = inventory.getItem(slot);
-        return stack.is(ModItems.SHAPE_EXCAVATOR.get()) ? stack : null;
+        return stack.is(ModTags.SHAPE_TOOLS) ? stack : null;
     }
 
-    private static void reject(ServerPlayer player, ApplyShapePayload request, String reason) {
+    private static void reject(ServerPlayer player, int sessionId, long expectedRevision, String reason) {
         PacketDistributor.sendToPlayer(player,
-                new ApplyResultPayload(request.sessionId(), false, request.expectedRevision(), reason(reason)));
+                new ApplyResultPayload(sessionId, false, expectedRevision, reason(reason)));
     }
 
     private static Component reason(String key) {

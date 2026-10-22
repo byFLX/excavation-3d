@@ -1,6 +1,4 @@
 {
-  "item.shapeexcavator.shape_excavator": "Formbagger",
-
   "key.categories.shapeexcavator": "Formbagger",
   "key.shapeexcavator.open_editor": "Formeditor öffnen",
   "key.shapeexcavator.single_block": "Einzelblock abbauen (halten)",
@@ -47,12 +45,14 @@
   "tool.shapeexcavator.active": "%1$s %2$s × %3$s × %4$s · %5$s Blöcke",
   "tool.shapeexcavator.invalid": "Form hier nicht erlaubt: %1$s – Einzelblöcke",
   "tool.shapeexcavator.single_block": "Einzelblock (Taste gehalten)",
-  "tool.shapeexcavator.hint": "Rechtsklick in die Luft oder Editor-Taste zum Einstellen",
+  "tool.shapeexcavator.hint": "%1$s: Form bearbeiten · %2$s halten: Einzelblock",
 
   "hud.shapeexcavator.preview": "Vorhanden %1$s · Luft %2$s · Ausgeschlossen %3$s · Nicht geladen %4$s · Schutz: entscheidet der Server",
 
   "message.shapeexcavator.applied": "Form übernommen",
-  "message.shapeexcavator.reject.not_holding_tool": "Halte den Formbagger in der Haupthand",
+  "message.shapeexcavator.removed": "Form entfernt – das Werkzeug baut wieder normal ab",
+  "message.shapeexcavator.reject.not_holding_tool": "Halte eine Spitzhacke, Schaufel oder Axt in der Haupthand",
+  "message.shapeexcavator.reject.not_shape_tool": "Dieses Item kann keine Form mehr tragen",
   "message.shapeexcavator.reject.session": "Editor-Sitzung abgelaufen – Editor neu öffnen",
   "message.shapeexcavator.reject.rate": "Zu viele Anfragen – erneut versuchen",
   "message.shapeexcavator.reject.tool_changed": "Das Werkzeug wurde gewechselt – Editor neu öffnen",
@@ -78,7 +78,7 @@
   "skip.shapeexcavator.unbreakable": "unzerstörbar: %s",
   "skip.shapeexcavator.protected": "geschützt: %s",
   "skip.shapeexcavator.refused": "Abbau verweigert: %s",
-  "skip.shapeexcavator.wrong_tool": "falsche Werkzeugstufe: %s",
+  "skip.shapeexcavator.wrong_tool": "falsches Werkzeug oder Stufe: %s",
   "skip.shapeexcavator.harder_than_start": "härter als der Startblock: %s",
 
   "gui.shapeexcavator.title": "Formbagger",
@@ -147,6 +147,7 @@
   "gui.shapeexcavator.world_preview": "Weltvorschau",
   "gui.shapeexcavator.apply": "Übernehmen",
   "gui.shapeexcavator.apply_show": "Übernehmen & in Welt zeigen",
+  "gui.shapeexcavator.remove": "Form entfernen",
   "gui.shapeexcavator.discard.title": "Änderungen verwerfen?",
   "gui.shapeexcavator.discard.message": "Das Werkzeug behält seine bisherige Form.",
 

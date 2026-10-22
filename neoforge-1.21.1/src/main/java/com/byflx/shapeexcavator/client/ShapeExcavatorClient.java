@@ -1,10 +1,16 @@
 package com.byflx.shapeexcavator.client;
 
 import com.byflx.shapeexcavator.ShapeExcavator;
+import com.byflx.shapeexcavator.data.ToolShapeData;
 import com.byflx.shapeexcavator.net.BypassPayload;
+import com.byflx.shapeexcavator.registry.ModTags;
+import com.byflx.shapeexcavator.text.ShapeTexts;
 import com.mojang.blaze3d.platform.InputConstants;
+import java.util.List;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
@@ -14,11 +20,12 @@ import net.neoforged.neoforge.client.event.InputEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.settings.KeyConflictContext;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.entity.player.ItemTooltipEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * Client-only entry point: key mappings, the in-world preview and the tool hint. Only constructed
+ * Client-only entry point: key mappings, the in-world preview, the tool hint and tooltip. Only constructed
  * on the physical client, so a dedicated server never loads these classes.
  */
 @Mod(value = ShapeExcavator.MOD_ID, dist = Dist.CLIENT)
@@ -35,6 +42,23 @@ public final class ShapeExcavatorClient {
         NeoForge.EVENT_BUS.addListener(ShapeExcavatorClient::onLoggingOut);
         NeoForge.EVENT_BUS.addListener(WorldPreview::onRenderLevel);
         NeoForge.EVENT_BUS.addListener(ToolHud::onRenderGui);
+        NeoForge.EVENT_BUS.addListener(ShapeExcavatorClient::onTooltip);
+    }
+
+    /**
+     * The tool hint (plan §2a): only on eligible tools that carry a shape, with the active shape, the
+     * editor key and the single-block key. Tools without a shape keep their vanilla tooltip.
+     */
+    private static void onTooltip(ItemTooltipEvent event) {
+        ToolShapeData data = ModTags.shapeOf(event.getItemStack());
+        if (data == null || openEditor == null || singleBlock == null) {
+            return;
+        }
+        List<Component> tooltip = event.getToolTip();
+        int at = Math.min(1, tooltip.size());
+        tooltip.add(at, ShapeTexts.toolSummary(data, ClientState.limits()));
+        tooltip.add(at + 1, Component.translatable("tool.shapeexcavator.hint", openEditor.getTranslatedKeyMessage(),
+                singleBlock.getTranslatedKeyMessage()).withStyle(ChatFormatting.DARK_GRAY));
     }
 
     private static void registerKeys(RegisterKeyMappingsEvent event) {

@@ -11,6 +11,7 @@ import com.byflx.shapeexcavator.net.ApplyResultPayload;
 import com.byflx.shapeexcavator.net.ApplyShapePayload;
 import com.byflx.shapeexcavator.net.BeginEditPayload;
 import com.byflx.shapeexcavator.net.EditSessionPayload;
+import com.byflx.shapeexcavator.net.RemoveShapePayload;
 import com.byflx.shapeexcavator.registry.ModComponents;
 import com.byflx.shapeexcavator.shape.Cell;
 import com.byflx.shapeexcavator.shape.GeneratedShape;
@@ -77,6 +78,7 @@ public final class ShapeEditorScreen extends Screen {
     private final SessionHandshake handshake = new SessionHandshake();
     private long revision;
     private boolean awaitingReply;
+    private boolean awaitingRemove;
     private boolean closeAfterApply;
     private Component status = Component.translatable("gui.shapeexcavator.status.connecting");
     private int statusColor = MUTED;
@@ -110,6 +112,7 @@ public final class ShapeEditorScreen extends Screen {
     private CycleButton<Boolean> worldPreviewButton;
     private Button applyButton;
     private Button applyShowButton;
+    private Button removeButton;
     private Button undoButton;
     private Button redoButton;
     private Button pasteButton;
@@ -394,10 +397,13 @@ public final class ShapeEditorScreen extends Screen {
     private void initActionRow() {
         int y = height - 26;
         int gap = 2;
-        int w = (width - 2 * MARGIN - 3 * gap) / 4;
+        int w = (width - 2 * MARGIN - 4 * gap) / 5;
         int x = MARGIN;
         addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> onClose())
                 .bounds(x, y, w, 20).build());
+        x += w + gap;
+        removeButton = addRenderableWidget(Button.builder(Component.translatable("gui.shapeexcavator.remove"),
+                b -> removeShape()).bounds(x, y, w, 20).build());
         x += w + gap;
         worldPreviewButton = addRenderableWidget(CycleButton.onOffBuilder(worldPreview)
                 .create(x, y, w, 20, Component.translatable("gui.shapeexcavator.world_preview"), (button, value) -> {
@@ -602,11 +608,24 @@ public final class ShapeEditorScreen extends Screen {
             applyButton.active = canApply;
             applyShowButton.active = canApply;
         }
+        updateRemoveButton();
         applyScroll();
     }
 
     private boolean canApply() {
         return handshake.sessionId() != 0 && !awaitingReply && pendingResize == null && evaluation != null && evaluation.isValid();
+    }
+
+    /** Only a tool that carries a shape can lose it; the held stack follows the server's slot sync. */
+    private boolean canRemove() {
+        return handshake.sessionId() != 0 && !awaitingReply && minecraft != null && minecraft.player != null
+                && minecraft.player.getInventory().getItem(slot).has(ModComponents.TOOL_SHAPE.get());
+    }
+
+    private void updateRemoveButton() {
+        if (removeButton != null) {
+            removeButton.active = canRemove();
+        }
     }
 
     // ---------------------------------------------------------------- presets
@@ -687,9 +706,25 @@ public final class ShapeEditorScreen extends Screen {
         refresh();
     }
 
+    /**
+     * "Remove shape" (plan §2a): the server deletes the whole component, so the tool mines like
+     * vanilla again. The draft stays, so the shape can be applied again from here.
+     */
+    private void removeShape() {
+        if (!canRemove()) {
+            return;
+        }
+        awaitingReply = true;
+        awaitingRemove = true;
+        setStatus(Component.translatable("gui.shapeexcavator.status.applying"), MUTED);
+        PacketDistributor.sendToServer(new RemoveShapePayload(handshake.sessionId(), slot, revision));
+        refresh();
+    }
+
     @Override
     public void tick() {
         super.tick();
+        updateRemoveButton();
         // Only runs while this screen is shown; behind the discard dialog the wait pauses.
         int retry = handshake.tick();
         if (retry != 0) {
@@ -722,6 +757,17 @@ public final class ShapeEditorScreen extends Screen {
             return;
         }
         awaitingReply = false;
+        if (awaitingRemove) {
+            awaitingRemove = false;
+            if (payload.accepted()) {
+                revision = payload.revision();
+                setStatus(payload.message(), OK);
+            } else {
+                setStatus(payload.message(), ERROR);
+            }
+            refresh();
+            return;
+        }
         if (payload.accepted()) {
             revision = payload.revision();
             boolean allSaved = saveState.accepted(submittedGeneration);

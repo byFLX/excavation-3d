@@ -3,7 +3,7 @@ package com.byflx.shapeexcavator.excavation;
 import com.byflx.shapeexcavator.config.ServerConfig;
 import com.byflx.shapeexcavator.data.ToolShapeData;
 import com.byflx.shapeexcavator.registry.ModComponents;
-import com.byflx.shapeexcavator.registry.ModItems;
+import com.byflx.shapeexcavator.registry.ModTags;
 import com.byflx.shapeexcavator.shape.Offset;
 import com.byflx.shapeexcavator.shape.Orientation;
 import com.byflx.shapeexcavator.shape.ShapeConfig;
@@ -148,12 +148,16 @@ public final class ExcavationService {
             return;
         }
         ItemStack tool = player.getMainHandItem();
-        if (!tool.is(ModItems.SHAPE_EXCAVATOR.get())) {
+        if (!tool.is(ModTags.SHAPE_TOOLS)) {
             return;
         }
         ToolShapeData data = tool.get(ModComponents.TOOL_SHAPE.get());
-        if (data == null || data.config().isEmpty()) {
-            // Not configured or unreadable: safe single-block fallback; tooltip and hint say so.
+        if (data == null) {
+            // No shape: the tool mines exactly like vanilla (plan §2a), without any message.
+            return;
+        }
+        if (data.config().isEmpty()) {
+            // Unreadable: safe single-block fallback; tooltip and hint say so.
             return;
         }
         BlockState state = event.getState();
@@ -324,7 +328,7 @@ public final class ExcavationService {
             return AbortReason.TOOL_BROKEN;
         }
         ToolShapeData data = tool.get(ModComponents.TOOL_SHAPE.get());
-        if (player.getInventory().selected != operation.slot || !tool.is(ModItems.SHAPE_EXCAVATOR.get())
+        if (player.getInventory().selected != operation.slot || !tool.is(ModTags.SHAPE_TOOLS)
                 || data == null || !data.toolId().equals(operation.toolId)) {
             return AbortReason.TOOL_CHANGED;
         }
@@ -359,6 +363,7 @@ public final class ExcavationService {
             return SkipReason.PROTECTED;
         }
         if (!player.isCreative()) {
+            // Suitability and tier come from the real tool (plan §2a), e.g. stone with a shovel.
             ItemStack tool = player.getMainHandItem();
             if (state.requiresCorrectToolForDrops() && !tool.isCorrectToolForDrops(state)) {
                 return SkipReason.WRONG_TOOL;

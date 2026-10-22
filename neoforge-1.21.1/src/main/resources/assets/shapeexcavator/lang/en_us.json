@@ -1,6 +1,4 @@
 {
-  "item.shapeexcavator.shape_excavator": "Shape Excavator",
-
   "key.categories.shapeexcavator": "Shape Excavator",
   "key.shapeexcavator.open_editor": "Open shape editor",
   "key.shapeexcavator.single_block": "Mine single block (hold)",
@@ -47,12 +45,14 @@
   "tool.shapeexcavator.active": "%1$s %2$s × %3$s × %4$s · %5$s blocks",
   "tool.shapeexcavator.invalid": "Shape not allowed here: %1$s - single blocks",
   "tool.shapeexcavator.single_block": "Single block (key held)",
-  "tool.shapeexcavator.hint": "Right-click into the air or press the editor key to configure",
+  "tool.shapeexcavator.hint": "%1$s: edit shape · hold %2$s: single block",
 
   "hud.shapeexcavator.preview": "Present %1$s · Air %2$s · Excluded %3$s · Not loaded %4$s · Protection: decided by server",
 
   "message.shapeexcavator.applied": "Shape applied",
-  "message.shapeexcavator.reject.not_holding_tool": "Hold the Shape Excavator in your main hand",
+  "message.shapeexcavator.removed": "Shape removed - the tool mines normally again",
+  "message.shapeexcavator.reject.not_holding_tool": "Hold a pickaxe, shovel or axe in your main hand",
+  "message.shapeexcavator.reject.not_shape_tool": "This item can no longer carry a shape",
   "message.shapeexcavator.reject.session": "Editor session expired - reopen the editor",
   "message.shapeexcavator.reject.rate": "Too many requests - try again",
   "message.shapeexcavator.reject.tool_changed": "The tool was changed - reopen the editor",
@@ -78,7 +78,7 @@
   "skip.shapeexcavator.unbreakable": "unbreakable: %s",
   "skip.shapeexcavator.protected": "protected: %s",
   "skip.shapeexcavator.refused": "refused removal: %s",
-  "skip.shapeexcavator.wrong_tool": "wrong tool tier: %s",
+  "skip.shapeexcavator.wrong_tool": "wrong tool or tier: %s",
   "skip.shapeexcavator.harder_than_start": "harder than the start block: %s",
 
   "gui.shapeexcavator.title": "Shape Excavator",
@@ -147,6 +147,7 @@
   "gui.shapeexcavator.world_preview": "World preview",
   "gui.shapeexcavator.apply": "Apply",
   "gui.shapeexcavator.apply_show": "Apply & show",
+  "gui.shapeexcavator.remove": "Remove shape",
   "gui.shapeexcavator.discard.title": "Discard changes?",
   "gui.shapeexcavator.discard.message": "The tool keeps its current shape.",
 

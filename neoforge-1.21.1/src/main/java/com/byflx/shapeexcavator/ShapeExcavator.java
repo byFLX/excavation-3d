@@ -4,7 +4,6 @@ import com.byflx.shapeexcavator.config.ServerConfig;
 import com.byflx.shapeexcavator.excavation.ExcavationService;
 import com.byflx.shapeexcavator.net.ModNetwork;
 import com.byflx.shapeexcavator.registry.ModComponents;
-import com.byflx.shapeexcavator.registry.ModItems;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -18,11 +17,10 @@ public final class ShapeExcavator {
     public static final String MOD_ID = "shapeexcavator";
 
     public ShapeExcavator(IEventBus modBus, ModContainer container) {
-        ModItems.ITEMS.register(modBus);
+        // No own item: shapes live on the tools in the shapeexcavator:shape_tools tag (plan §2a).
         ModComponents.COMPONENTS.register(modBus);
         container.registerConfig(ModConfig.Type.SERVER, ServerConfig.SPEC);
         modBus.addListener(ModNetwork::register);
-        modBus.addListener(ModItems::addToCreativeTab);
 
         IEventBus gameBus = NeoForge.EVENT_BUS;
         gameBus.addListener(ModNetwork::onLogin);

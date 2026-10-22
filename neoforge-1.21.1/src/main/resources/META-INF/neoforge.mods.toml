@@ -7,7 +7,7 @@ modId="shapeexcavator"
 version="${version}"
 displayName="Shape Excavator"
 authors="byFLX"
-description='''A hand tool whose excavation shape is configured in game, with numeric fields and a rotatable 3D block preview.'''
+description='''Excavation shapes for normal pickaxes, shovels and axes, configured in game with numeric fields and a rotatable 3D block preview.'''
 
 [[dependencies.shapeexcavator]]
 modId="neoforge"

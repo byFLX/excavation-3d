@@ -1,17 +1,19 @@
 # Shape Excavator
 
-Standalone Minecraft 1.21.1 / NeoForge 21.1.x mod: a hand tool whose excavation shape is configured in game, with numeric fields and a rotatable 3D block preview. It does not depend on Create.
+Standalone Minecraft 1.21.1 / NeoForge 21.1.x mod: normal mining tools (pickaxes, shovels, axes, also from other mods) get an excavation shape that is configured in game, with numeric fields and a rotatable 3D block preview. There is no own tool item. It does not depend on Create.
 
 - Plan and acceptance criteria: [docs/SHAPE_EXCAVATOR_PLAN.md](docs/SHAPE_EXCAVATOR_PLAN.md)
 - Acceptance matrix (automated evidence and open in-game checks): [docs/ACCEPTANCE_MATRIX.md](docs/ACCEPTANCE_MATRIX.md)
 - Gradle project: `neoforge-1.21.1/` (`./gradlew test build`; world-level Game Tests: `./gradlew runGameTestServer`)
-- Status: stages 1–5 of the plan are implemented (geometric core, editor with 3D preview, custom layer editor and presets, tool data component with server-confirmed apply and world preview, server-side excavation). The in-game and multiplayer checks of stage 6 are listed as open in the acceptance matrix; they have not been run.
+- Status: stages 1–5 of the plan are implemented (geometric core, editor with 3D preview, custom layer editor and presets, tool data component with server-confirmed apply and world preview, server-side excavation), with the correction of plan §2a (shapes on normal tools, no own item). The in-game and multiplayer checks of stage 6 are listed as open in the acceptance matrix; they have not been run.
 
-## Using the tool
+## Using the tools
 
-- Craft: iron ingot, redstone, iron ingot over two sticks (`data/shapeexcavator/recipe/shape_excavator.json`). Also in the Tools creative tab.
-- Right-click into the air, or press the editor key (default `V`), to open the editor. Apply sends the shape to the server; only its confirmation changes the tool.
-- Mining the targeted block with the tool excavates the shape in survival mode, once the tool has really mined and harvested that start block. In creative mode the tool mines single blocks. Hold the single-block key (default Shift) to mine one block only.
+- Eligible tools: every item in the item tag `shapeexcavator:shape_tools`, which contains `#minecraft:pickaxes`, `#minecraft:shovels` and `#minecraft:axes` (`data/shapeexcavator/tags/item/shape_tools.json`). Tools of other mods in these tags are included; datapacks can add or remove tools.
+- Hold an eligible tool in the main hand and press the editor key (default `V`) to open the editor. Right-clicks are never intercepted, so shovels, axes and other mods' tools keep their own right-click actions. Apply sends the shape to the server; only its confirmation stores the shape on that tool.
+- A tool without a shape behaves exactly like vanilla: it mines single blocks and shows no hint. Opening and cancelling the editor does not change it. "Remove shape" in the editor deletes the shape, so the tool mines normally again.
+- Mining the targeted block with a tool that carries a shape excavates the shape in survival mode, once the tool has really mined and harvested that start block. Suitability, tier, enchantments and durability come from the tool itself; extra blocks the tool is not correct for (e.g. stone with a shovel) are skipped and reported. In creative mode it mines single blocks. Hold the single-block key (default Shift) to mine one block only.
+- The shape stays on the tool through anvil repair and renaming, enchanting and the netherite upgrade, as far as vanilla keeps the item's components.
 - Server limits and work budgets: `serverconfig/shapeexcavator-server.toml` in the world folder. Personal presets: `config/shapeexcavator-presets.json`.
 
 ## Code layout (`com.byflx.shapeexcavator`)
@@ -20,7 +22,7 @@ Standalone Minecraft 1.21.1 / NeoForge 21.1.x mod: a hand tool whose excavation 
 |---|---|---|
 | `shape` | Pure geometry: config, generator, validator, transforms, orientation, encoding | both |
 | `editor` | Editor draft and custom layer draft (undo/redo, resize) | both, pure |
-| `data`, `registry`, `item`, `config` | Data component and codecs, registration, the tool, server config | both |
+| `data`, `registry`, `config` | Data component and codecs, component registration and the `shape_tools` tag key, server config | both |
 | `net` | Payloads and server-side editor sessions | both (handlers per side) |
 | `excavation` | Server-side excavation and tick budgets | server logic |
 | `client` | Editor screen, 3D preview, world preview, hint, keys, presets | client only |
