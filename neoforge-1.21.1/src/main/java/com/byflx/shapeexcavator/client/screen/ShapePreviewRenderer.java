@@ -130,6 +130,7 @@ public final class ShapePreviewRenderer {
         pose.scale(1.0F, -1.0F, -1.0F);
         pose.translate(-w / 2.0F, -h / 2.0F, -d / 2.0F);
         Matrix4f matrix = new Matrix4f(pose.last().pose());
+        ShapeDiff active = resultView ? ShapeDiff.NONE : activeHighlight(shape);
 
         List<PendingLabel> pending = labels(font, matrix, shape, resultView);
         List<LabelPlacement.Label> anchors = new ArrayList<>(pending.size());
@@ -138,7 +139,9 @@ public final class ShapePreviewRenderer {
         }
         LabelPlacement.Rect panel = new LabelPlacement.Rect(x0 + LABEL_PADDING, y0 + LABEL_PADDING,
                 x1 - LABEL_PADDING, y1 - LABEL_PADDING);
-        LabelPlacement.Layout layout = LabelPlacement.layout(anchors, projectedBox(matrix, w, h, d), panel);
+        // Removed-block ghosts are drawn outside the shape; the labels keep clear of them too.
+        LabelPlacement.Layout layout = LabelPlacement.layout(anchors, projectedBox(matrix, active.bounds(shape)),
+                panel);
         // Without a free side the labels sit in a strip at the bottom; the shape is clipped above it.
         if (layout.clipsShape()) {
             graphics.enableScissor(x0, y0, x1, Mth.clamp(layout.shapeMaxY(), y0, y1));
@@ -155,7 +158,7 @@ public final class ShapePreviewRenderer {
             float ax = anchor.x() + 0.5F;
             float ay = anchor.y() + 0.5F;
             bar(consumer, matrix, ax, ay, anchor.z() - 1.8F, ax, ay, anchor.z(), 0.06F, FORWARD);
-            drawHighlight(consumer, matrix, shape);
+            drawHighlight(consumer, matrix, shape, active);
         }
         graphics.flush();
         if (layout.clipsShape()) {
@@ -268,21 +271,28 @@ public final class ShapePreviewRenderer {
         return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
-    /** Translucent overlays on added cells and ghost cubes for removed ones, fading out. */
-    private void drawHighlight(VertexConsumer consumer, Matrix4f matrix, GeneratedShape shape) {
+    /** The size-change diff still shown on {@code shape}, or {@link ShapeDiff#NONE} once it faded out. */
+    private ShapeDiff activeHighlight(GeneratedShape shape) {
         if (highlight.isEmpty() || !shape.equals(highlightShape)) {
+            return ShapeDiff.NONE;
+        }
+        if (Util.getMillis() - highlightStart >= HIGHLIGHT_MS) {
+            highlight = ShapeDiff.NONE;
+            highlightShape = null;
+        }
+        return highlight;
+    }
+
+    /** Translucent overlays on added cells and ghost cubes for removed ones, fading out. */
+    private void drawHighlight(VertexConsumer consumer, Matrix4f matrix, GeneratedShape shape, ShapeDiff diff) {
+        if (diff.isEmpty()) {
             return;
         }
         long elapsed = Util.getMillis() - highlightStart;
-        if (elapsed >= HIGHLIGHT_MS) {
-            highlight = ShapeDiff.NONE;
-            highlightShape = null;
-            return;
-        }
-        float fade = 1.0F - (float) elapsed / HIGHLIGHT_MS;
+        float fade = Math.max(0.0F, 1.0F - (float) elapsed / HIGHLIGHT_MS);
         Cell anchor = shape.anchor();
-        overlay(consumer, matrix, highlight.added(), anchor, ADDED, 0.6F * fade, 0.03F);
-        overlay(consumer, matrix, highlight.removed(), anchor, REMOVED, 0.5F * fade, 0.0F);
+        overlay(consumer, matrix, diff.added(), anchor, ADDED, 0.6F * fade, 0.03F);
+        overlay(consumer, matrix, diff.removed(), anchor, REMOVED, 0.5F * fade, 0.0F);
     }
 
     /** Outer faces of the anchor-relative {@code cells}, placed at the shown shape's anchor. */
@@ -376,15 +386,17 @@ public final class ShapePreviewRenderer {
         }
     }
 
-    /** The screen rectangle covered by the shape's bounding box. */
-    private static LabelPlacement.Rect projectedBox(Matrix4f matrix, int w, int h, int d) {
+    /** The screen rectangle covered by {@code box}: the shape's bounding box plus any removed-block ghosts. */
+    private static LabelPlacement.Rect projectedBox(Matrix4f matrix, ShapeDiff.Bounds box) {
         float minX = Float.MAX_VALUE;
         float minY = Float.MAX_VALUE;
         float maxX = -Float.MAX_VALUE;
         float maxY = -Float.MAX_VALUE;
         Vector3f p = new Vector3f();
         for (int corner = 0; corner < 8; corner++) {
-            matrix.transformPosition((corner & 1) * w, ((corner >> 1) & 1) * h, ((corner >> 2) & 1) * d, p);
+            matrix.transformPosition((corner & 1) == 0 ? box.minX() : box.maxX(),
+                    ((corner >> 1) & 1) == 0 ? box.minY() : box.maxY(),
+                    ((corner >> 2) & 1) == 0 ? box.minZ() : box.maxZ(), p);
             minX = Math.min(minX, p.x());
             minY = Math.min(minY, p.y());
             maxX = Math.max(maxX, p.x());

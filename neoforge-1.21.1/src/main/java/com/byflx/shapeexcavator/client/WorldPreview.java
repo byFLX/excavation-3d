@@ -42,9 +42,9 @@ import org.joml.Matrix4fStack;
  * is identical. It only looks: nothing is broken and no break events are fired. Permissions and
  * protection are decided by the server, so the hint labels them as unknown.
  *
- * <p>Drawn calmly (request 2026-10-22): the outer contour of the whole selection, a light fill on
- * the outer faces of the blocks expected to be mined and the start block in yellow. Air, excluded
- * and unloaded positions get nothing of their own.
+ * <p>Drawn calmly (request 2026-10-22): the outer contour of the blocks expected to be mined, a
+ * light fill on their outer faces and the start block in yellow. Air, excluded and unloaded
+ * positions get neither an outline nor a fill.
  */
 public final class WorldPreview {
     private static final float[] CONTOUR = {0.92F, 0.96F, 1.0F, 0.85F};
@@ -158,7 +158,7 @@ public final class WorldPreview {
             COUNTS.merge(category, 1, Integer::sum);
         }
         origin = start;
-        contour = ContourEdges.of(cells.keySet());
+        contour = ContourEdges.of(PreviewFill.minedCells(cells));
         fill = PreviewFill.of(cells);
     }
 

@@ -8,6 +8,7 @@ import com.byflx.shapeexcavator.preview.PreviewFill.Face;
 import com.byflx.shapeexcavator.preview.PreviewFill.Side;
 import com.byflx.shapeexcavator.shape.Offset;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -62,5 +63,36 @@ class PreviewFillTest {
         assertEquals(5, result.faces().size());
         assertFalse(result.faces().contains(new Face(1, 0, 0, Side.WEST)));
         assertTrue(result.faces().contains(new Face(1, 0, 0, Side.EAST)));
+    }
+
+    @Test
+    void contourCellsAreOnlyTheMinedOnes() {
+        Map<Offset, CellCategory> cells = new LinkedHashMap<>();
+        cells.put(new Offset(0, 0, 0), CellCategory.START);
+        cells.put(new Offset(1, 0, 0), CellCategory.PRESENT);
+        cells.put(new Offset(2, 0, 0), CellCategory.AIR);
+        cells.put(new Offset(3, 0, 0), CellCategory.EXCLUDED);
+        cells.put(new Offset(4, 0, 0), CellCategory.UNLOADED);
+        assertEquals(List.of(new Offset(0, 0, 0), new Offset(1, 0, 0)), PreviewFill.minedCells(cells));
+    }
+
+    @Test
+    void isolatedSkippedCellGetsNoOutline() {
+        // A custom 3 × 1 × 1 row whose middle is air and a lone excluded cell further out.
+        Map<Offset, CellCategory> cells = new LinkedHashMap<>();
+        cells.put(new Offset(0, 0, 0), CellCategory.START);
+        cells.put(new Offset(1, 0, 0), CellCategory.AIR);
+        cells.put(new Offset(2, 0, 0), CellCategory.PRESENT);
+        cells.put(new Offset(5, 0, 0), CellCategory.EXCLUDED);
+        List<ContourEdges.Edge> edges = ContourEdges.of(PreviewFill.minedCells(cells));
+        // Two separate blocks: 12 edges each, none around the air or the excluded cell.
+        assertEquals(24, edges.size());
+        for (ContourEdges.Edge edge : edges) {
+            boolean aroundSkipped = switch (edge.axis()) {
+                case X -> edge.x() == 1 || edge.x() == 5;
+                case Y, Z -> edge.x() == 5 || edge.x() == 6;
+            };
+            assertFalse(aroundSkipped, edge.toString());
+        }
     }
 }

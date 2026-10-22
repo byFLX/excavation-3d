@@ -71,4 +71,18 @@ public final class PreviewFill {
         }
         return new Result(Collections.unmodifiableList(faces), Optional.ofNullable(start), count);
     }
+
+    /**
+     * The cells the contour is drawn around: only the blocks expected to be mined (start included),
+     * so air, excluded and unloaded positions never get an outline of their own.
+     */
+    public static List<Offset> minedCells(Map<Offset, CellCategory> cells) {
+        List<Offset> mined = new ArrayList<>();
+        for (Map.Entry<Offset, CellCategory> entry : cells.entrySet()) {
+            if (entry.getValue().mined()) {
+                mined.add(entry.getKey());
+            }
+        }
+        return Collections.unmodifiableList(mined);
+    }
 }
