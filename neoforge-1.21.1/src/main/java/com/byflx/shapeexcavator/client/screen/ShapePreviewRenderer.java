@@ -10,7 +10,9 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
@@ -18,6 +20,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
@@ -52,6 +55,8 @@ public final class ShapePreviewRenderer {
     private static final long HIGHLIGHT_MS = 900L;
     /** Space at the top of the panel kept free for its caption and icon buttons. */
     private static final int LABEL_TOP_RESERVE = 14;
+    /** Space at the bottom of the panel kept free for the camera hint line. */
+    private static final int LABEL_BOTTOM_RESERVE = 12;
     // Brightness per face: -x, +x, -y, +y, -z (front), +z (back).
     private static final float[] SHADE = {0.78F, 0.78F, 0.5F, 1.0F, 0.9F, 0.6F};
 
@@ -110,6 +115,19 @@ public final class ShapePreviewRenderer {
         pose.translate(-w / 2.0F, -h / 2.0F, -d / 2.0F);
         Matrix4f matrix = new Matrix4f(pose.last().pose());
 
+        List<PendingLabel> pending = labels(font, matrix, shape, resultView);
+        List<LabelPlacement.Label> anchors = new ArrayList<>(pending.size());
+        for (PendingLabel label : pending) {
+            anchors.add(label.anchor());
+        }
+        LabelPlacement.Rect panel = new LabelPlacement.Rect(x0 + 2, y0 + LABEL_TOP_RESERVE, x1 - 2,
+                y1 - LABEL_BOTTOM_RESERVE);
+        LabelPlacement.Layout layout = LabelPlacement.layout(anchors, projectedBox(matrix, w, h, d), panel);
+        // Without a free side the labels sit in a strip at the bottom; the shape is clipped above it.
+        if (layout.clipsShape()) {
+            graphics.enableScissor(x0, y0, x1, Mth.clamp(layout.shapeMaxY(), y0, y1));
+        }
+
         VertexConsumer consumer = graphics.bufferSource().getBuffer(RenderType.gui());
         drawGrid(consumer, matrix, w, d);
         for (int q = 0; q < quads; q++) {
@@ -124,24 +142,41 @@ public final class ShapePreviewRenderer {
             drawHighlight(consumer, matrix, shape);
         }
         graphics.flush();
+        if (layout.clipsShape()) {
+            graphics.disableScissor();
+        }
         pose.popPose();
         // The labels must stay readable in front of the cubes.
         RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
 
-        LabelPlacement.Rect shapeRect = projectedBox(matrix, w, h, d);
-        LabelPlacement.Rect panel = new LabelPlacement.Rect(x0 + 2, y0 + LABEL_TOP_RESERVE, x1 - 2, y1 - 2);
-        label(graphics, font, matrix, w + 0.9F, 0, 0, Component.translatable("gui.shapeexcavator.axis.width", w),
-                AXIS_WIDTH, shapeRect, panel);
-        label(graphics, font, matrix, 0, h + 0.9F, 0, Component.translatable("gui.shapeexcavator.axis.height", h),
-                AXIS_HEIGHT, shapeRect, panel);
-        label(graphics, font, matrix, 0, 0, d + 0.9F, Component.translatable("gui.shapeexcavator.axis.depth", d),
-                AXIS_DEPTH, shapeRect, panel);
-        if (!resultView) {
-            Cell anchor = shape.anchor();
-            label(graphics, font, matrix, anchor.x() + 0.5F, anchor.y() + 0.5F, anchor.z() - 2.2F,
-                    Component.translatable("gui.shapeexcavator.axis.front"), FORWARD, shapeRect, panel);
+        for (int i = 0; i < pending.size(); i++) {
+            LabelPlacement.Rect at = layout.labels().get(i);
+            graphics.drawString(font, pending.get(i).text(), at.x0(), at.y0() + 1, pending.get(i).color());
         }
         graphics.disableScissor();
+    }
+
+    private record PendingLabel(Component text, int color, LabelPlacement.Label anchor) {
+    }
+
+    /** The width, height and depth labels at their axis ends, plus "Front" in front of the anchor. */
+    private static List<PendingLabel> labels(Font font, Matrix4f matrix, GeneratedShape shape, boolean resultView) {
+        int w = shape.width();
+        int h = shape.height();
+        int d = shape.depth();
+        List<PendingLabel> labels = new ArrayList<>(4);
+        labels.add(label(font, matrix, w + 0.9F, 0, 0, Component.translatable("gui.shapeexcavator.axis.width", w),
+                AXIS_WIDTH));
+        labels.add(label(font, matrix, 0, h + 0.9F, 0, Component.translatable("gui.shapeexcavator.axis.height", h),
+                AXIS_HEIGHT));
+        labels.add(label(font, matrix, 0, 0, d + 0.9F, Component.translatable("gui.shapeexcavator.axis.depth", d),
+                AXIS_DEPTH));
+        if (!resultView) {
+            Cell anchor = shape.anchor();
+            labels.add(label(font, matrix, anchor.x() + 0.5F, anchor.y() + 0.5F, anchor.z() - 2.2F,
+                    Component.translatable("gui.shapeexcavator.axis.front"), FORWARD));
+        }
+        return labels;
     }
 
     private void rebuild(GeneratedShape shape, boolean resultView) {
@@ -343,11 +378,10 @@ public final class ShapePreviewRenderer {
                 (int) Math.ceil(maxY));
     }
 
-    private static void label(GuiGraphics graphics, Font font, Matrix4f matrix, float x, float y, float z,
-            Component text, int color, LabelPlacement.Rect shapeRect, LabelPlacement.Rect panel) {
+    private static PendingLabel label(Font font, Matrix4f matrix, float x, float y, float z, Component text,
+            int color) {
         Vector3f screen = matrix.transformPosition(x, y, z, new Vector3f());
-        LabelPlacement.Rect at = LabelPlacement.place(Math.round(screen.x()), Math.round(screen.y()),
-                font.width(text), font.lineHeight, shapeRect, panel);
-        graphics.drawString(font, text, at.x0(), at.y0() + 1, color);
+        return new PendingLabel(text, color, new LabelPlacement.Label(Math.round(screen.x()), Math.round(screen.y()),
+                font.width(text), font.lineHeight));
     }
 }

@@ -1,11 +1,15 @@
 package com.byflx.shapeexcavator.preview;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
- * Places a dimension label of the editor preview next to its axis end, but never on top of the
- * shape: if the wanted spot overlaps the shape's screen rectangle, the label moves to the nearest
- * free side of it. The result stays inside the panel whenever the panel has room for it.
+ * Places the dimension labels of the editor preview next to their axis ends, but never on top of
+ * the shape: a label whose wanted spot overlaps the shape's screen rectangle moves to the nearest
+ * free side of it. When the shape leaves no free side (zoomed in, small panel), all labels go into a
+ * strip at the bottom of the panel and the shape is clipped above that strip, so the labels still
+ * never cover it.
  */
 public final class LabelPlacement {
     /** Screen rectangle, x1/y1 exclusive. */
@@ -23,23 +27,51 @@ public final class LabelPlacement {
         }
     }
 
+    /** A label to place: its projected axis end and its size. */
+    public record Label(int anchorX, int anchorY, int width, int height) {
+    }
+
+    /**
+     * @param labels    the label rectangles, in input order
+     * @param shapeMaxY the shape must only be drawn above this y (exclusive); {@link Integer#MAX_VALUE}
+     *                  when every label found a free spot beside the shape
+     */
+    public record Layout(List<Rect> labels, int shapeMaxY) {
+        public boolean clipsShape() {
+            return shapeMaxY != Integer.MAX_VALUE;
+        }
+    }
+
     private static final int GAP = 2;
 
     private LabelPlacement() {
+    }
+
+    /** Places every label beside the shape or, if one has no free spot, all of them in the bottom strip. */
+    public static Layout layout(List<Label> labels, Rect shape, Rect panel) {
+        List<Rect> placed = new ArrayList<>(labels.size());
+        for (Label label : labels) {
+            Optional<Rect> rect = place(label.anchorX(), label.anchorY(), label.width(), label.height(), shape, panel);
+            if (rect.isEmpty()) {
+                return strip(labels, panel);
+            }
+            placed.add(rect.get());
+        }
+        return new Layout(List.copyOf(placed), Integer.MAX_VALUE);
     }
 
     /**
      * @param anchorX the projected axis end the label belongs to
      * @param width   label width
      * @param height  label height
-     * @return the label rectangle
+     * @return the label rectangle, or empty if no spot inside the panel avoids the shape
      */
-    public static Rect place(int anchorX, int anchorY, int width, int height, Rect shape, Rect panel) {
+    public static Optional<Rect> place(int anchorX, int anchorY, int width, int height, Rect shape, Rect panel) {
         Rect blocked = shape.inflate(GAP);
         Rect wanted = clamp(new Rect(anchorX - width / 2, anchorY - height / 2, anchorX - width / 2 + width,
                 anchorY - height / 2 + height), panel);
         if (!wanted.intersects(blocked) && wanted.inside(panel)) {
-            return wanted;
+            return Optional.of(wanted);
         }
         List<Rect> candidates = List.of(
                 clamp(at(blocked.x1, wanted.y0, width, height), panel, false, true),
@@ -60,8 +92,38 @@ public final class LabelPlacement {
                 best = candidate;
             }
         }
-        // No free side inside the panel (panel smaller than shape plus label): best effort.
-        return best != null ? best : wanted;
+        return Optional.ofNullable(best);
+    }
+
+    /** All labels in rows at the bottom of the panel, left to right; the shape is clipped above them. */
+    private static Layout strip(List<Label> labels, Rect panel) {
+        int rowHeight = 0;
+        for (Label label : labels) {
+            rowHeight = Math.max(rowHeight, label.height());
+        }
+        int[] rows = new int[labels.size()];
+        int[] xs = new int[labels.size()];
+        int row = 0;
+        int x = panel.x0;
+        for (int i = 0; i < labels.size(); i++) {
+            int width = labels.get(i).width();
+            if (x > panel.x0 && x + width > panel.x1) {
+                row++;
+                x = panel.x0;
+            }
+            rows[i] = row;
+            xs[i] = x;
+            x += width + 2 * GAP;
+        }
+        int rowCount = row + 1;
+        int top = Math.max(panel.y0, panel.y1 - rowCount * rowHeight - (rowCount - 1) * GAP);
+        List<Rect> placed = new ArrayList<>(labels.size());
+        for (int i = 0; i < labels.size(); i++) {
+            Label label = labels.get(i);
+            int y = top + rows[i] * (rowHeight + GAP);
+            placed.add(new Rect(xs[i], y, xs[i] + label.width(), y + label.height()));
+        }
+        return new Layout(List.copyOf(placed), top - GAP);
     }
 
     private static Rect at(int x, int y, int width, int height) {

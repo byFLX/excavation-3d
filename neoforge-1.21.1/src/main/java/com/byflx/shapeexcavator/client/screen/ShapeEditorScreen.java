@@ -457,7 +457,6 @@ public final class ShapeEditorScreen extends Screen {
 
     private void closeMenu() {
         if (presetName != null) {
-            presetCursor = presetName.getValue();
             removeWidget(presetName);
             removeWidget(presetSave);
         }
@@ -512,6 +511,8 @@ public final class ShapeEditorScreen extends Screen {
         presetName.setMaxLength(PresetRepository.MAX_NAME_LENGTH);
         presetName.setHint(Component.translatable("gui.shapeexcavator.preset.name"));
         presetName.setValue(presetCursor);
+        // Kept as typed, so a resize or GUI scale change (which rebuilds the screen) never loses it.
+        presetName.setResponder(text -> presetCursor = text);
         presetSave = Button.builder(saveLabel, b -> savePreset())
                 .bounds(x + menuW - 4 - saveW, y + 3, saveW, 18).build();
         addWidget(presetName);
