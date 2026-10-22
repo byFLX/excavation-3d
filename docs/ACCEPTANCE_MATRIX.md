@@ -1,0 +1,53 @@
+# Acceptance matrix: Shape Excavator
+
+Maps every acceptance test of [plan §12](SHAPE_EXCAVATOR_PLAN.md#12-verbindliche-abnahmetests) to its evidence.
+
+- **Automated** – a JUnit test in `neoforge-1.21.1/src/test/java` (run by `./gradlew test build`).
+- **In game – open** – needs a client, a dedicated server or two players. Not run yet. A passing build does not replace these checks (plan §12, last paragraph).
+
+Test paths are relative to `neoforge-1.21.1/src/test/java/com/byflx/shapeexcavator/`.
+
+## Inputs and geometry
+
+| Plan §12 check | Evidence | Status |
+|---|---|---|
+| 7 × 5 × 2 entered as text: preview and generator give 70 | `editor/EditorDraftTest.typedFieldsDriveTheSameGeneratorAsTheServer`, `shape/ShapeGeneratorTest.cuboid7x5x2Selects70` | Automated. Typing with the keyboard in the real `EditBox`: in game – open |
+| 3 × 3 × 1 gives 9; plus 3 × 3 × 1 arm 1 gives exactly 5 | `shape/ShapeGeneratorTest.cuboid3x3x1Selects9`, `plus3x3x1Arm1IsExactlyFiveCells` | Automated |
+| Plus 5 × 5 × 2 gives 18; stair and corridor have separate tested masks | `shape/ShapeGeneratorTest.plus5x5Counts`, `stairColumnHeights`, `corridorAndStairHaveDifferentMasks` | Automated |
+| Corridor 3 × 3 with six 1-block steps: 3 × 8 × 6 and 54 | `shape/ShapeGeneratorTest.corridorExampleFromPlan` | Automated |
+| Even sizes, all six hit faces, four quarter turns, mirroring twice | `shape/AnchorTest`, `shape/OrientationTest`, `shape/ShapeTransformTest`, `editor/EditorDraftTest.transformButtonsChangeMaskAndAnchorTogether` | Automated |
+| Empty field, 0, negative, decimal, over-long, derived oversize: no crash, no silent save | `shape/NumericInputTest`, `shape/ShapeGeneratorTest.extremeValuesProduceIssuesNotExceptions`, `editor/EditorDraftTest.fieldsMayBeEmptyWhileTypingAndAreNeverCorrected`, `derivedOversizeIsAnIssueNotAFieldError` | Automated (Apply is disabled whenever `Evaluation.isValid()` is false). Visual state in game – open |
+
+## Editor and storage
+
+| Plan §12 check | Evidence | Status |
+|---|---|---|
+| Camera rotation changes no shape data; shape rotation changes mask and anchor consistently | `PreviewCamera` holds only view state and is never passed to the generator; `editor/EditorDraftTest.transformButtonsChangeMaskAndAnchorTogether` | Automated for the data; dragging the 3D view in game – open |
+| Deselected custom cells appear neither in the preview nor in the server selection | `shape/CustomMaskTest.deselectedCellsAreNeverSelected`, `editor/CustomMaskDraftTest.deselectingRemovesCellsFromTheMask` | Automated (preview, world preview and server all use `ShapeGenerator`) |
+| Shrinking with data loss asks for confirmation; undo restores | `editor/CustomMaskDraftTest.shrinkingReportsLossAndUndoRestores`, `editor/EditorDraftTest.customSizeFieldsRequestResizeInsteadOfApplyingIt` | Automated for the model; confirmation button in game – open |
+| GUI scale and window resize keep the draft; Cancel keeps the active configuration | Widgets are rebuilt from `EditorDraft` in `ShapeEditorScreen.init()`; Cancel never sends a payload | In game – open |
+| Restart, drop/pick up and hand-over keep the shape; two tools stay independent | `data/ShapeCodecsTest.componentSurvivesPersistence`, `componentSurvivesNetworkSync`, `twoToolsStayIndependent`, `brokenStoredShapeIsDroppedNotTheItem` | Automated for the codecs; in game – open |
+| Invalid revision, tool change and oversized network data are rejected | `net/EditSessions.apply` (session, slot, tool id, revision, rate, full regeneration); `data/ShapeCodecsTest.oversizedNetworkMaskIsRejectedBeforeAllocation`, `malformedNetworkShapesAreRejected` | Decoding automated; session checks need a server – open |
+
+## Mining and multiplayer
+
+| Plan §12 check | Evidence | Status |
+|---|---|---|
+| A refused or failed start block triggers no extra mining | `ExcavationService.onBreak` (lowest priority, not cancelled) + `startPending` (start block must be gone) | In game – open |
+| Protected positions, machines, wrong tool tier and unloaded chunks stay untouched | `ExcavationService.check` (+ the real `destroyBlock` path, which fires the break event for protection mods) | In game / Game Test – open |
+| Start and extra blocks give loot, XP and wear at most once | Extra blocks use `ServerPlayerGameMode.destroyBlock` once each; the start block is excluded from the targets | In game – open |
+| Extra mining starts no recursive cascade | `BREAKING_EXTRA` guard in `ExcavationService` | In game – open |
+| Tool breaking, player or dimension change end running operations | `ExcavationService.validate`, `onDeath`, `onChangedDimension`, `onLogout` | In game – open |
+| Two players and parallel operations respect the global tick budget | `excavation/BudgetSchedulerTest` | Scheduler automated; two-player run – open |
+| Editor, world preview and server compute the same selection; deviations are reported with reasons | One `ShapeGenerator` + `Orientation` + `GeneratedShape.worldOffsets` for all three; skip reasons in the result message | Shared code; visual comparison in game – open |
+
+## Stage 6 checks still open
+
+None of these have been run:
+
+1. Dedicated server start (`./gradlew runServer`) with the mod, joining with a client: no client class loading on the server.
+2. Two clients on one server: independent tools, parallel excavation, budget.
+3. A claim/protection mod: protected blocks are skipped and reported.
+4. GUI scale 1–4 and small windows: no overlap, scrolling parameter area, draft kept.
+5. A shader pack: editor preview and world preview outlines still visible.
+6. Game Tests for break events, loot/XP/wear once, unloaded chunks (plan §12, last paragraph). Not written yet.
