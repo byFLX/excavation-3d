@@ -46,11 +46,12 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * <ul>
  *   <li>The start block's {@link BlockEvent.BreakEvent} (lowest priority, only if nobody cancelled
  *       it so far) records an unconfirmed attempt with the orientation frozen at that moment. A
- *       listener running after this one may still cancel the break, so the attempt is only
- *       confirmed from the tool's {@code onBlockStartBreak} hook, which the player's own
+ *       listener running after this one may still cancel the break, so in survival the attempt is
+ *       only confirmed from the tool's {@code mineBlock} hook, which the player's own
  *       {@code destroyBlock} calls after the event was not cancelled. The operation starts at the
- *       end of the tick only if the attempt was confirmed and the start block is really gone; see
- *       {@link StartGate}. Another player's break of the same block never starts it.</li>
+ *       end of the tick only if the attempt was confirmed, the kept event is still not cancelled
+ *       and the start block was really removed; see {@link StartGate}. Another player's break of
+ *       the same block never starts it.</li>
  *   <li>Extra blocks go through the player's own {@code ServerPlayerGameMode.destroyBlock}, which
  *       fires the break event for protection mods and handles loot, experience and tool wear once
  *       per block. Breaks caused by the operation never start another operation.</li>
@@ -70,8 +71,9 @@ public final class ExcavationService {
     private record ClickedFace(BlockPos pos, Direction face) {
     }
 
+    /** {@code event} is kept so the end of the tick sees whether any later listener cancelled it. */
     private record Pending(ServerLevel level, BlockPos pos, BlockState state, List<Offset> offsets,
-            float startProgress, int slot, UUID toolId) {
+            float startProgress, int slot, UUID toolId, BlockEvent.BreakEvent event) {
     }
 
     private static final class Operation {
@@ -172,14 +174,18 @@ public final class ExcavationService {
         Orientation orientation = Orientation.orient(hitFace(player, level, pos), player.getDirection(),
                 Orientation.Mode.forType(config.type()));
         STARTS.attempt(id, pos, new Pending(level, pos, state, valid.shape().worldOffsets(orientation),
-                state.getDestroyProgress(player, level, pos), player.getInventory().selected, data.toolId()));
+                state.getDestroyProgress(player, level, pos), player.getInventory().selected, data.toolId(), event));
+        if (player.isCreative()) {
+            // Creative destroyBlock never calls mineBlock. After the event only the removal itself is
+            // left, so the final event state and the removal check in startPending decide.
+            STARTS.confirm(id, pos);
+        }
     }
 
     /**
-     * Called from {@link com.byflx.shapeexcavator.item.ShapeExcavatorItem#onBlockStartBreak} inside
-     * the player's own {@code destroyBlock}, i.e. only after the break event was not cancelled by
-     * any listener. The only gate left before the block is removed is the build restriction, which
-     * is checked here as well.
+     * Called from {@link com.byflx.shapeexcavator.item.ShapeExcavatorItem#mineBlock} inside the
+     * player's own survival {@code destroyBlock}, i.e. only after the break event was not cancelled
+     * by any listener. The build restriction is checked here as well.
      */
     public static void onStartBlockBreakPassed(ServerPlayer player, BlockPos pos) {
         UUID id = player.getUUID();
@@ -237,10 +243,11 @@ public final class ExcavationService {
     }
 
     private static void startPending(MinecraftServer server) {
-        // Unconfirmed attempts (cancelled or refused breaks) and starts whose block is still there
-        // are dropped here, even if someone else removed the block in the meantime.
+        // Unconfirmed attempts, events a later listener cancelled, and starts whose block was not
+        // removed (still there, property change, replacement) are dropped here, even if someone else
+        // removed the block in the meantime.
         Map<UUID, Pending> started = STARTS.drain(
-                (pos, pending) -> pending.level().getBlockState(pos) != pending.state());
+                (pos, pending) -> !pending.event().isCanceled() && startBlockRemoved(pending));
         for (Map.Entry<UUID, Pending> entry : started.entrySet()) {
             Pending pending = entry.getValue();
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
@@ -257,6 +264,17 @@ public final class ExcavationService {
                 OPERATIONS.put(entry.getKey(), new Operation(player, pending, targets));
             }
         }
+    }
+
+    /**
+     * The start block is gone: the position holds what the removal leaves behind (air, or the
+     * block's own fluid when waterlogged), or a fluid such as the water ice turns into. A changed
+     * property or a different solid block does not count.
+     */
+    private static boolean startBlockRemoved(Pending pending) {
+        BlockState now = pending.level().getBlockState(pending.pos());
+        return now == pending.state().getFluidState().createLegacyBlock() || now.isAir()
+                || now.getBlock() instanceof LiquidBlock;
     }
 
     private static void process(Operation operation, int budget) {

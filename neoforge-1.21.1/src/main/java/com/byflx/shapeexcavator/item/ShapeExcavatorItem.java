@@ -13,6 +13,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.DiggerItem;
 import net.minecraft.world.item.Item;
@@ -20,6 +21,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Tiers;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * The hand tool (plan §2). Mines like an iron pickaxe and shovel. Right-clicking into the air
@@ -44,15 +46,16 @@ public class ShapeExcavatorItem extends DiggerItem {
     }
 
     /**
-     * Called by the player's own {@code destroyBlock} after the break event was not cancelled. This is
-     * the success signal for the start block; the event alone may still be cancelled later.
+     * Vanilla hook, called only by the player's own survival {@code destroyBlock} after the break
+     * event was not cancelled. This is the survival success signal for the start block; the event
+     * alone may still be cancelled by a later listener. Wear stays with {@code super}.
      */
     @Override
-    public boolean onBlockStartBreak(ItemStack stack, BlockPos pos, Player player) {
-        if (player instanceof ServerPlayer serverPlayer) {
+    public boolean mineBlock(ItemStack stack, Level level, BlockState state, BlockPos pos, LivingEntity miningEntity) {
+        if (!level.isClientSide() && miningEntity instanceof ServerPlayer serverPlayer) {
             ExcavationService.onStartBlockBreakPassed(serverPlayer, pos);
         }
-        return false;
+        return super.mineBlock(stack, level, state, pos, miningEntity);
     }
 
     @Override

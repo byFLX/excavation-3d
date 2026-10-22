@@ -29,6 +29,18 @@ class StartGateTest {
     }
 
     @Test
+    void confirmedAttemptWhoseEventWasCancelledLaterStartsNothing() {
+        StartGate<boolean[]> gate = new StartGate<>();
+        // Creative path: confirmed in the listener, the kept event decides at the end of the tick.
+        boolean[] cancelled = {false};
+        gate.attempt(A, POS, cancelled);
+        gate.confirm(A, POS);
+        // A later listener cancels A's event; B then removes the block.
+        cancelled[0] = true;
+        assertTrue(gate.drain((pos, event) -> !event[0]).isEmpty());
+    }
+
+    @Test
     void unconfirmedAttemptNeverStartsEvenIfTheBlockIsGone() {
         StartGate<String> gate = new StartGate<>();
         gate.attempt(A, POS, "a");
