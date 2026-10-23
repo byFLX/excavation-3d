@@ -53,7 +53,9 @@ public final class QuickMenuLogic {
     }
 
     public static Layout layout(int screenWidth, int screenHeight, int count, int requestedOffset) {
-        int rows = Math.min(count, Math.min(MAX_ROWS, Math.max(1, (screenHeight - 80) / ROW_HEIGHT)));
+        // The list is centred vertically on the crosshair. Reserve room on both ends for
+        // the title and footer (page count, scroll hint, two instruction lines).
+        int rows = Math.min(count, Math.min(MAX_ROWS, Math.max(1, (screenHeight - 120) / ROW_HEIGHT)));
         int offset = Math.max(0, Math.min(requestedOffset, count - rows));
         return new Layout(screenWidth / 2, screenHeight / 2,
                 Math.max(20, Math.min(190, screenWidth / 2 - CENTER_RADIUS - 12)), count, offset, rows);

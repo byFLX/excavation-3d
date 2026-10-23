@@ -43,12 +43,13 @@ public final class QuickShapeScreen extends Screen {
     private QuickMenuLogic.Layout layout() { return QuickMenuLogic.layout(width, height, entries.size(), offset); }
 
     @Override public void tick() {
-        if (minecraft.player == null || minecraft.player.getInventory().selected != slot
+        if (!minecraft.isWindowActive() || minecraft.player == null || minecraft.player.getInventory().selected != slot
                 || minecraft.player.getMainHandItem() != tool) { onClose(); return; }
         if (!ShapeExcavatorClient.isEditorKeyDown()) {
             double mx = minecraft.mouseHandler.xpos() * width / minecraft.getWindow().getScreenWidth();
             double my = minecraft.mouseHandler.ypos() * height / minecraft.getWindow().getScreenHeight();
             int selected = layout().highlighted(mx, my);
+            ShapeExcavatorClient.cancelEditorGesture();
             minecraft.setScreen(null);
             if (selected >= 0) choose(entries.get(selected));
         }
@@ -78,9 +79,11 @@ public final class QuickShapeScreen extends Screen {
     @Override public void render(GuiGraphics g, int mx, int my, float partialTick) {
         QuickMenuLogic.Layout l = layout();
         int selected = l.highlighted(mx, my);
-        var hints = font.split(Component.translatable("gui.shapeexcavator.quick.hint"), l.width());
+        var hints = List.of(Component.translatable("gui.shapeexcavator.quick.release"),
+                Component.translatable("gui.shapeexcavator.quick.cancel"));
+        int hintLines = hints.stream().mapToInt(line -> font.split(line, l.width()).size()).sum();
         g.fill(l.x() - 4, l.y() - 16, l.x() + l.width() + 4,
-                l.y() + l.rows() * QuickMenuLogic.ROW_HEIGHT + 17 + hints.size() * font.lineHeight, 0xF010141C);
+                l.y() + l.rows() * QuickMenuLogic.ROW_HEIGHT + 27 + hintLines * font.lineHeight, 0xF010141C);
         g.drawString(font, title, l.x(), l.y() - 12, 0xFFFFFF);
         g.renderOutline(l.centerX() - 6, l.centerY() - 6, 12, 12, 0xFFE0E0E0);
         for (int row = 0; row < l.rows(); row++) {
@@ -90,10 +93,14 @@ public final class QuickShapeScreen extends Screen {
         }
         g.drawString(font, Component.translatable("gui.shapeexcavator.quick.page", l.offset() + 1,
                 l.offset() + l.rows(), entries.size()), l.x(), l.y() + l.rows() * QuickMenuLogic.ROW_HEIGHT + 3, 0xAAAAAA);
-        int hintY = l.y() + l.rows() * QuickMenuLogic.ROW_HEIGHT + 15;
-        for (var line : hints) {
-            g.drawString(font, line, l.x(), hintY, 0xAAAAAA);
-            hintY += font.lineHeight;
+        g.drawString(font, Component.translatable("gui.shapeexcavator.quick.scroll"), l.x(),
+                l.y() + l.rows() * QuickMenuLogic.ROW_HEIGHT + 13, 0xAAAAAA);
+        int hintY = l.y() + l.rows() * QuickMenuLogic.ROW_HEIGHT + 25;
+        for (var hint : hints) {
+            for (var line : font.split(hint, l.width())) {
+                g.drawString(font, line, l.x(), hintY, 0xAAAAAA);
+                hintY += font.lineHeight;
+            }
         }
     }
 }

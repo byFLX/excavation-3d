@@ -30,12 +30,12 @@ import org.lwjgl.opengl.GL11;
  * Renders the selected cells of a {@link GeneratedShape} as real cubes in the editor (plan §5):
  * selected cells are solid, so a plus looks like a plus and custom holes stay visible. Faces
  * between two selected cells are skipped. Adds a floor grid, labelled width/height/depth axes, the
- * anchor in gold and an arrow pointing from the front into the block.
+ * anchor in gold and a caption explaining the front direction.
  *
  * <p>The block scale stays fixed while the shape changes ({@link PreviewScale}), so a size change
  * reads as one against the 1-block floor grid; added cells flash green and removed cells red for a
- * second. Custom mode also draws the canvas and current-layer ghosts. Dimension labels attach to
- * their edge midpoints with leaders ({@link LabelPlacement#edges}).
+ * second. Custom mode also draws the canvas and current-layer ghosts. Dimension labels sit beyond their own axis ends and outside the projected shape bounds;
+ * a label is hidden if there is no free space.
  *
  * <p>Local axes: x = width (right), y = height (up), z = depth (into the block, away from the
  * viewer in the front view). The mesh is cached per shape; camera changes only change the matrix.
@@ -147,13 +147,14 @@ public final class ShapePreviewRenderer {
         ShapeDiff active = resultView ? ShapeDiff.NONE : activeHighlight(shape);
 
         List<PendingLabel> pending = labels(font, matrix, shape);
-        List<LabelPlacement.Label> anchors = new ArrayList<>(pending.size());
+        List<LabelPlacement.AxisLabel> anchors = new ArrayList<>(pending.size());
         for (PendingLabel label : pending) {
             anchors.add(label.anchor());
         }
         LabelPlacement.Rect panel = new LabelPlacement.Rect(x0 + LABEL_PADDING, y0 + LABEL_PADDING,
                 x1 - LABEL_PADDING, y1 - LABEL_PADDING);
-        LabelPlacement.Layout layout = LabelPlacement.edges(anchors, panel);
+        List<Optional<LabelPlacement.Rect>> layout = LabelPlacement.axisEnds(anchors,
+                projectedBounds(matrix, w, h, d, resultView), panel);
 
         VertexConsumer consumer = graphics.bufferSource().getBuffer(RenderType.gui());
         drawGrid(consumer, matrix, w, d);
@@ -172,10 +173,6 @@ public final class ShapePreviewRenderer {
         }
         drawAxes(consumer, matrix, w, h, d);
         if (!resultView) {
-            Cell anchor = shape.anchor();
-            float ax = anchor.x() + 0.5F;
-            float ay = anchor.y() + 0.5F;
-            bar(consumer, matrix, ax, ay, anchor.z() - 1.8F, ax, ay, anchor.z(), 0.06F, FORWARD);
             drawHighlight(consumer, matrix, shape, active);
             if (custom) {
                 pick(mouseX, mouseY, layer).ifPresent(hit -> {
@@ -197,41 +194,33 @@ public final class ShapePreviewRenderer {
         RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
 
         for (int i = 0; i < pending.size(); i++) {
-            LabelPlacement.Rect at = layout.labels().get(i);
-            // Leader connects each label to the middle of its own edge, even at awkward camera angles.
-            PendingLabel edge = pending.get(i);
-            graphics.fill(Math.min(edge.edgeX(), at.x0() + (at.x1() - at.x0()) / 2), edge.edgeY(),
-                    Math.max(edge.edgeX(), at.x0() + (at.x1() - at.x0()) / 2) + 1, edge.edgeY() + 1,
-                    pending.get(i).color());
-            graphics.fill(at.x0() + (at.x1() - at.x0()) / 2, Math.min(edge.edgeY(), at.y0()),
-                    at.x0() + (at.x1() - at.x0()) / 2 + 1, Math.max(edge.edgeY(), at.y0()) + 1,
-                    pending.get(i).color());
-        }
-        // All leaders go behind all labels.
-        for (int i = 0; i < pending.size(); i++) {
-            LabelPlacement.Rect at = layout.labels().get(i);
-            graphics.fill(at.x0() - 2, at.y0(), at.x1() + 2, at.y1() + 1, 0xFF0E1116);
-            graphics.drawString(font, pending.get(i).text(), at.x0(), at.y0() + 1, pending.get(i).color());
+            if (layout.get(i).isEmpty()) continue;
+            LabelPlacement.Rect at = layout.get(i).get();
+            graphics.drawString(font, pending.get(i).text(), at.x0(), at.y0(), pending.get(i).color(), true);
         }
         graphics.disableScissor();
-        if (!resultView) graphics.drawCenteredString(font, Component.translatable("gui.shapeexcavator.axis.front"),
-                (x0 + x1) / 2, frontY, FORWARD);
+        if (!resultView) {
+            graphics.enableScissor(x0, frontY, x1, frontY + font.lineHeight);
+            graphics.drawCenteredString(font, Component.translatable("gui.shapeexcavator.axis.front"),
+                    (x0 + x1) / 2, frontY, FORWARD);
+            graphics.disableScissor();
+        }
     }
 
-    private record PendingLabel(Component text, int color, LabelPlacement.Label anchor, int edgeX, int edgeY) {
+    private record PendingLabel(Component text, int color, LabelPlacement.AxisLabel anchor) {
     }
 
-    /** The width, height and depth labels at the middle of their own edges. */
+    /** Labels use exactly the same endpoints as the rendered axes. */
     private static List<PendingLabel> labels(Font font, Matrix4f matrix, GeneratedShape shape) {
         int w = shape.width();
         int h = shape.height();
         int d = shape.depth();
         List<PendingLabel> labels = new ArrayList<>(3);
-        labels.add(label(font, matrix, w / 2.0F, -0.8F, 0, w / 2.0F, 0, 0, Component.translatable("gui.shapeexcavator.axis.width", w),
+        labels.add(label(font, matrix, w + 0.6F, -0.05F, -0.05F, Component.translatable("gui.shapeexcavator.axis.width", w),
                 AXIS_WIDTH));
-        labels.add(label(font, matrix, -0.8F, h / 2.0F, 0, 0, h / 2.0F, 0, Component.translatable("gui.shapeexcavator.axis.height", h),
+        labels.add(label(font, matrix, -0.05F, h + 0.6F, -0.05F, Component.translatable("gui.shapeexcavator.axis.height", h),
                 AXIS_HEIGHT));
-        labels.add(label(font, matrix, -0.8F, 0, d / 2.0F, 0, 0, d / 2.0F, Component.translatable("gui.shapeexcavator.axis.depth", d),
+        labels.add(label(font, matrix, -0.05F, -0.05F, d + 0.6F, Component.translatable("gui.shapeexcavator.axis.depth", d),
                 AXIS_DEPTH));
         return labels;
     }
@@ -446,11 +435,27 @@ public final class ShapePreviewRenderer {
         }
     }
 
+    private static LabelPlacement.Rect projectedBounds(Matrix4f matrix, int w, int h, int d, boolean result) {
+        float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
+        float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
+        for (int x : new int[] {0, w}) for (int y : new int[] {result ? -1 : 0, h}) {
+            for (int z : new int[] {0, d}) {
+                Vector3f p = matrix.transformPosition(x, y, z, new Vector3f());
+                minX = Math.min(minX, p.x()); minY = Math.min(minY, p.y());
+                maxX = Math.max(maxX, p.x()); maxY = Math.max(maxY, p.y());
+            }
+        }
+        return new LabelPlacement.Rect((int) Math.floor(minX) - 3, (int) Math.floor(minY) - 3,
+                (int) Math.ceil(maxX) + 3, (int) Math.ceil(maxY) + 3);
+    }
+
     private static PendingLabel label(Font font, Matrix4f matrix, float x, float y, float z,
-            float edgeX, float edgeY, float edgeZ, Component text, int color) {
+            Component text, int color) {
         Vector3f screen = matrix.transformPosition(x, y, z, new Vector3f());
-        Vector3f edge = matrix.transformPosition(edgeX, edgeY, edgeZ, new Vector3f());
-        return new PendingLabel(text, color, new LabelPlacement.Label(Math.round(screen.x()), Math.round(screen.y()),
-                font.width(text), font.lineHeight), Math.round(edge.x()), Math.round(edge.y()));
+        Vector3f origin = matrix.transformPosition(-0.05F, -0.05F, -0.05F, new Vector3f());
+        var label = new LabelPlacement.Label(Math.round(screen.x()), Math.round(screen.y()),
+                font.width(text) + 1, font.lineHeight + 1);
+        return new PendingLabel(text, color, new LabelPlacement.AxisLabel(label,
+                Math.round(origin.x()), Math.round(origin.y())));
     }
 }

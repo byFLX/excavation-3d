@@ -6,6 +6,20 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class QuickMenuLogicTest {
+    @Test void crosshairAnchorAndEntireMenuFitTheMinimumGuiSizeWithFooterSpace() {
+        for (int width : new int[] {320, 427, 640, 1046}) for (int height : new int[] {240, 274, 480, 824}) {
+            for (int count : new int[] {1, 4, 66}) {
+                var layout = QuickMenuLogic.layout(width, height, count, 1000);
+                assertEquals(width / 2, layout.centerX());
+                assertEquals(height / 2, layout.centerY());
+                assertTrue(layout.x() >= 4 && layout.x() + layout.width() + 4 <= width);
+                assertTrue(layout.y() - 16 >= 0);
+                assertTrue(layout.y() + layout.rows() * 20 + 54 <= height);
+                assertEquals(-1, layout.highlighted(layout.centerX(), layout.centerY()));
+            }
+        }
+    }
+
     @Test void tapOpensEditorAndHoldOpensMenuExactlyOnce() {
         var hold = new QuickMenuLogic.Hold();
         assertEquals(QuickMenuLogic.Gesture.NONE, hold.update(true, 1000));

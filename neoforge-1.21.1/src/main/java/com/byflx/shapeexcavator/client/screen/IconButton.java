@@ -38,6 +38,18 @@ final class IconButton extends Button {
         return new IconButton(x, y, size, size, label, null, Component.literal(glyph), onPress);
     }
 
+    static IconButton rotate(int x, int y, int size, Component label, OnPress onPress) {
+        return pattern(x, y, size, size, label, onPress,
+                "..#####....", ".##...##...", "##.....##.#", "#.......###", "#......####",
+                "#..........", "#..........", "##......#..", ".##....##..", "..######...", "....##.....");
+    }
+
+    static IconButton mirror(int x, int y, int size, Component label, OnPress onPress) {
+        return pattern(x, y, size, size, label, onPress,
+                ".....#.....", "#....#....#", "##...#...##", "###..#..###", "####.#.####",
+                "###..#..###", "##...#...##", "#....#....#", ".....#.....", ".....#.....", ".....#.....");
+    }
+
     void setSelected(boolean selected) {
         this.selected = selected;
     }

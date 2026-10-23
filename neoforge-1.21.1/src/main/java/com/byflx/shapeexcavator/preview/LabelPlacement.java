@@ -50,6 +50,49 @@ public final class LabelPlacement {
     private LabelPlacement() {
     }
 
+    /** An axis label with its projected origin; the label must stay beyond its own endpoint. */
+    public record AxisLabel(Label label, int originX, int originY) { }
+
+    /** No fallback over geometry: an unplaceable label is hidden, retaining its input index. */
+    public static List<Optional<Rect>> axisEnds(List<AxisLabel> labels, Rect shape, Rect panel) {
+        List<Optional<Rect>> result = new ArrayList<>();
+        List<Rect> taken = new ArrayList<>();
+        for (AxisLabel axis : labels) {
+            Label label = axis.label();
+            double dx = label.anchorX() - axis.originX(), dy = label.anchorY() - axis.originY();
+            double length = Math.hypot(dx, dy);
+            Rect best = null;
+            double distance = Double.POSITIVE_INFINITY;
+            if (length >= 1) {
+                double ux = dx / length, uy = dy / length;
+                double reach = Math.abs(ux) * label.width() / 2.0 + Math.abs(uy) * label.height() / 2.0 + 6;
+                int wantedX = (int) Math.round(label.anchorX() + ux * reach - label.width() / 2.0);
+                int wantedY = (int) Math.round(label.anchorY() + uy * reach - label.height() / 2.0);
+                List<Integer> xs = new ArrayList<>(List.of(wantedX, panel.x0(), panel.x1() - label.width(),
+                        shape.x0() - GAP - label.width(), shape.x1() + GAP));
+                for (Rect other : taken) {
+                    xs.add(other.x0() - GAP - label.width());
+                    xs.add(other.x1() + GAP);
+                }
+                for (int y = panel.y0(); y + label.height() <= panel.y1(); y++) {
+                    for (int x : xs) {
+                        Rect candidate = at(x, y, label.width(), label.height());
+                        // The nearest corner must be beyond the plane through the axis end.
+                        double nearX = ux >= 0 ? candidate.x0() : candidate.x1();
+                        double nearY = uy >= 0 ? candidate.y0() : candidate.y1();
+                        if ((nearX - label.anchorX()) * ux + (nearY - label.anchorY()) * uy < GAP
+                                || !free(candidate, shape.inflate(GAP), panel, taken)) continue;
+                        double cost = Math.pow(x - wantedX, 2) + Math.pow(y - wantedY, 2);
+                        if (cost < distance) { best = candidate; distance = cost; }
+                    }
+                }
+            }
+            result.add(Optional.ofNullable(best));
+            if (best != null) taken.add(best);
+        }
+        return List.copyOf(result);
+    }
+
     /** Labels near projected edge midpoints, with leaders drawn by the caller. Never form a strip. */
     public static Layout edges(List<Label> labels, Rect panel) {
         int edgeGap = 6;

@@ -12,6 +12,66 @@ import org.junit.jupiter.api.Test;
 
 class LabelPlacementTest {
     @Test
+    void axisEndsAvoidTheShapeAndEachOtherAcrossCameraAnglesAndPanelSizes() {
+        for (int panelWidth : new int[] {142, 164, 240, 600}) {
+            Rect panel = new Rect(0, 0, panelWidth, 120);
+            for (int yaw = -180; yaw < 180; yaw += 15) {
+                for (int pitch : new int[] {10, 25, 65}) {
+                    for (int scale : new int[] {6, 16, 48}) {
+                        var camera = new PreviewPicking.Camera(panelWidth / 2.0, 60, scale, yaw, pitch, 5, 3, 1);
+                        var origin = camera.project(new PreviewPicking.Vec(-0.05, -0.05, -0.05));
+                        var ends = List.of(new PreviewPicking.Vec(5.6, -0.05, -0.05),
+                                new PreviewPicking.Vec(-0.05, 3.6, -0.05), new PreviewPicking.Vec(-0.05, -0.05, 1.6));
+                        var labels = ends.stream().map(camera::project).map(p -> new LabelPlacement.AxisLabel(
+                                new Label((int) Math.round(p.x()), (int) Math.round(p.y()), 48, 10),
+                                (int) Math.round(origin.x()), (int) Math.round(origin.y()))).toList();
+                        double minX = Double.POSITIVE_INFINITY, minY = Double.POSITIVE_INFINITY;
+                        double maxX = Double.NEGATIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY;
+                        for (int x : new int[] {0, 5}) for (int y : new int[] {0, 3}) for (int z : new int[] {0, 1}) {
+                            var p = camera.project(new PreviewPicking.Vec(x, y, z));
+                            minX = Math.min(minX, p.x()); minY = Math.min(minY, p.y());
+                            maxX = Math.max(maxX, p.x()); maxY = Math.max(maxY, p.y());
+                        }
+                        Rect shape = new Rect((int) Math.floor(minX) - 3, (int) Math.floor(minY) - 3,
+                                (int) Math.ceil(maxX) + 3, (int) Math.ceil(maxY) + 3);
+                        var placed = LabelPlacement.axisEnds(labels, shape, panel);
+                        assertEquals(3, placed.size());
+                        for (int i = 0; i < placed.size(); i++) {
+                            if (placed.get(i).isEmpty()) continue;
+                            Rect r = placed.get(i).get();
+                            assertTrue(r.inside(panel));
+                            assertFalse(r.intersects(shape.inflate(2)));
+                            var axis = labels.get(i);
+                            double dx = axis.label().anchorX() - axis.originX();
+                            double dy = axis.label().anchorY() - axis.originY();
+                            for (int x : new int[] {r.x0(), r.x1()}) for (int y : new int[] {r.y0(), r.y1()}) {
+                                assertTrue((x - axis.label().anchorX()) * dx + (y - axis.label().anchorY()) * dy > 0,
+                                        "every corner must be beyond its own axis end");
+                            }
+                            for (int j = 0; j < i; j++) if (placed.get(j).isPresent()) {
+                                assertFalse(r.intersects(placed.get(j).get().inflate(2)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void crowdedOrOversizedAxisLabelsAreHiddenInsteadOfOverlapping() {
+        var axis = new LabelPlacement.AxisLabel(new Label(80, 50, 40, 9), 50, 50);
+        var placed = LabelPlacement.axisEnds(List.of(axis, axis), new Rect(30, 30, 70, 70), new Rect(0, 0, 130, 100));
+        assertTrue(placed.get(0).isPresent());
+        assertTrue(placed.get(1).isPresent());
+        assertFalse(placed.get(0).get().intersects(placed.get(1).get()));
+        assertTrue(LabelPlacement.axisEnds(List.of(axis), new Rect(-10, -10, 150, 120),
+                new Rect(0, 0, 130, 100)).getFirst().isEmpty());
+        assertTrue(LabelPlacement.axisEnds(List.of(axis), new Rect(0, 0, 1, 1),
+                new Rect(0, 0, 30, 8)).getFirst().isEmpty());
+    }
+
+    @Test
     void edgeMidpointsKeepSeparateLabelsWithoutAFallbackStrip() {
         Rect panel = new Rect(170, 40, 311, 160);
         for (int y = 50; y < 220; y += 17) {
