@@ -1,56 +1,69 @@
 package com.byflx.shapeexcavator.client;
 
 import com.byflx.shapeexcavator.data.ToolShapeData;
+import com.byflx.shapeexcavator.editor.ToolHintState;
 import com.byflx.shapeexcavator.preview.CellCategory;
 import com.byflx.shapeexcavator.registry.ModTags;
+import java.util.List;
 import net.minecraft.ChatFormatting;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 
-/**
- * One tool hint above the hotbar: active shape or single-block mode. Holding Shift replaces it
- * with detailed world-preview counts and the reminder that protection is decided by the server.
- */
+/** A centred, temporary tool hint above vanilla's dynamically stacked HUD elements. */
 public final class ToolHud {
-    private ToolHud() {
+    private static final float SCALE = 0.85F;
+    private static ToolHintState state = new ToolHintState();
+    private record HeldTool(int slot, Object item) { }
+    private record ShapeState(Object config, boolean worldPreview) { }
+
+    private ToolHud() { }
+
+    public static void confirmedChange() { state.confirmedChange(); }
+    static void reset() { state = new ToolHintState(); }
+
+    static void tick(Minecraft mc) {
+        boolean eligible = mc.player != null && mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS);
+        ToolShapeData data = eligible ? ModTags.shapeOf(mc.player.getMainHandItem()) : null;
+        Object tool = eligible ? new HeldTool(mc.player.getInventory().selected, mc.player.getMainHandItem().getItem()) : null;
+        Object shape = data == null ? null : new ShapeState(data.config().orElse(null), data.worldPreview());
+        state.update(Util.getMillis(), eligible, tool, shape, ClientState.bypassActive(), Screen.hasShiftDown(),
+                mc.screen == null && !mc.options.hideGui);
     }
 
     static void onRenderGui(RenderGuiEvent.Post event) {
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null || minecraft.options.hideGui || minecraft.screen != null
-                || QuickShapeAction.showingFeedback()) {
-            return;
-        }
-        // Eligible tools also show Off, so the quick menu's normal-mining state is visible.
-        ToolShapeData data = ModTags.shapeOf(minecraft.player.getMainHandItem());
-        if (!minecraft.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) {
-            return;
-        }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.options.hideGui || mc.screen != null
+                || !mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) return;
+        int opacity = (int) Math.round(state.opacity(Util.getMillis()) * 255);
+        if (opacity < 4) return; // Minecraft treats tiny text alpha values as opaque.
+        ToolShapeData data = ModTags.shapeOf(mc.player.getMainHandItem());
         Component line = ClientState.bypassActive()
                 ? Component.translatable("tool.shapeexcavator.single_block").withStyle(ChatFormatting.YELLOW)
                 : ClientState.toolSummary(data);
-        // Details replace the tool line only while Shift is physically held.
         if (WorldPreview.active() && Screen.hasShiftDown()) {
             line = Component.translatable("hud.shapeexcavator.preview",
-                    WorldPreview.count(CellCategory.PRESENT),
-                    WorldPreview.count(CellCategory.AIR),
-                    WorldPreview.count(CellCategory.EXCLUDED),
-                    WorldPreview.count(CellCategory.UNLOADED)).withStyle(ChatFormatting.GRAY);
+                    WorldPreview.count(CellCategory.PRESENT), WorldPreview.count(CellCategory.AIR),
+                    WorldPreview.count(CellCategory.EXCLUDED), WorldPreview.count(CellCategory.UNLOADED))
+                    .withStyle(ChatFormatting.GRAY);
         }
-        // Small, beside the hotbar's right end, so it stays out of the view and clear of hearts and item names.
-        GuiGraphics graphics = event.getGuiGraphics();
-        float x = graphics.guiWidth() / 2F + HOTBAR_HALF_WIDTH + 6;
-        float y = graphics.guiHeight() - 14;
-        graphics.pose().pushPose();
-        graphics.pose().translate(x, y, 0);
-        graphics.pose().scale(SCALE, SCALE, 1);
-        graphics.drawString(minecraft.font, line, 0, 0, 0xFFFFFF);
-        graphics.pose().popPose();
+        GuiGraphics g = event.getGuiGraphics();
+        List<FormattedCharSequence> lines = mc.font.split(line, (int) ((g.guiWidth() - 16) / SCALE));
+        float textHeight = lines.size() * mc.font.lineHeight * SCALE;
+        float y = ToolHintState.bottom(g.guiHeight(), mc.gui.leftHeight, mc.gui.rightHeight) - textHeight;
+        if (y < g.guiHeight() / 2F + 8) return; // No free lower-centre space at this size / health stack.
+        g.pose().pushPose();
+        g.pose().translate(g.guiWidth() / 2F, y, 0);
+        g.pose().scale(SCALE, SCALE, 1);
+        for (int i = 0; i < lines.size(); i++) {
+            FormattedCharSequence text = lines.get(i);
+            g.drawString(mc.font, text, -mc.font.width(text) / 2, i * mc.font.lineHeight,
+                    (opacity << 24) | 0xFFFFFF, true);
+        }
+        g.pose().popPose();
     }
-
-    private static final int HOTBAR_HALF_WIDTH = 91;
-    private static final float SCALE = 0.75F;
 }

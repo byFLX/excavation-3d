@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class QuickMenuLogicTest {
-    @Test void crosshairAnchorAndEntireWheelFitAllEffectiveGuiScalesWithFooterSpace() {
+    @Test void crosshairAnchorAndEntireWheelFitAllEffectiveGuiScales() {
         for (int windowWidth : new int[] {854, 1280, 1920}) {
             for (int windowHeight : new int[] {480, 720, 1080}) {
                 for (int requestedScale = 1; requestedScale <= 4; requestedScale++) {
@@ -23,7 +23,10 @@ class QuickMenuLogicTest {
                         assertTrue(layout.centerX() - 102 * layout.scale() >= 0);
                         assertTrue(layout.centerX() + 102 * layout.scale() <= width);
                         assertTrue(layout.centerY() - 102 * layout.scale() >= 0);
-                        assertTrue(layout.footerY() + 19 * layout.scale() <= height);
+                        if (layout.showInstructions()) {
+                            assertTrue(layout.instructionsY() >= 6);
+                            assertTrue(layout.instructionsY() + 19 * layout.scale() < layout.centerY() - layout.radius());
+                        }
                         assertTrue(layout.deadZone() > 0 && layout.deadZone() < layout.radius());
                         assertEquals(-1, layout.highlighted(layout.centerX(), layout.centerY()));
                     }
@@ -126,7 +129,7 @@ class QuickMenuLogicTest {
             assertTrue(layout.radius() <= 88);
             assertTrue(layout.centerX() - 102 * layout.scale() >= 0);
             assertTrue(layout.centerY() - 102 * layout.scale() >= 0);
-            assertTrue(layout.footerY() + 19 * layout.scale() <= size[1]);
+            assertFalse(layout.showInstructions());
         }
     }
 

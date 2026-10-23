@@ -519,7 +519,7 @@ public final class ShapeEditorScreen extends Screen {
             return;
         }
         CustomMaskDraft custom = draft.custom();
-        gridBaseY = resizeBaseY + (pendingResize != null ? ROW : 0) + 2;
+        gridBaseY = resizeBaseY + (pendingResize != null ? ROW : 0) + font.lineHeight + 10;
         cellSize = Mth.clamp(Math.min(leftW / custom.width(), 220 / custom.height()), 3, 12);
         contentHeight = gridBaseY + cellSize * custom.height() + 4 - contentTop;
     }
@@ -980,6 +980,7 @@ public final class ShapeEditorScreen extends Screen {
             return;
         }
         awaitingReply = false;
+        if (payload.accepted()) com.byflx.shapeexcavator.client.ToolHud.confirmedChange();
         if (awaitingRemove) {
             awaitingRemove = false;
             if (payload.accepted()) {
@@ -1324,6 +1325,8 @@ public final class ShapeEditorScreen extends Screen {
         CustomMaskDraft custom = draft.custom();
         int gx = gridX();
         int gy = gridBaseY - scroll;
+        graphics.drawCenteredString(font, Component.translatable("gui.shapeexcavator.layer.grid", layer + 1),
+                leftX + leftW / 2, gy - font.lineHeight - 4, MUTED);
         int w = custom.width();
         int h = custom.height();
         graphics.fill(gx - 1, gy - 1, gx + w * cellSize, gy + h * cellSize, 0xFF101010);

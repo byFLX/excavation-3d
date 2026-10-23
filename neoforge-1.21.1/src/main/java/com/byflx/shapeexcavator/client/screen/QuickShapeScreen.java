@@ -9,6 +9,7 @@ import com.byflx.shapeexcavator.editor.QuickMenuLogic;
 import com.byflx.shapeexcavator.registry.ModComponents;
 import com.byflx.shapeexcavator.shape.ShapeConfig;
 import com.byflx.shapeexcavator.shape.ShapeGenerator;
+import com.byflx.shapeexcavator.preview.ShapeThumbnail;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.List;
 import net.minecraft.ChatFormatting;
@@ -28,7 +29,7 @@ public final class QuickShapeScreen extends Screen {
     private static final int MUTED = 0xFFA4ACB4;
     private static final int ACCENT = 0xFFE0B020;
     private record WheelEntry(QuickMenuLogic.Entry entry, ShapeConfig config, Component name,
-            Component details, boolean active, boolean enabled) { }
+            Component details, ShapeThumbnail thumbnail, boolean active, boolean enabled) { }
 
     private final List<WheelEntry> entries;
     private final int slot;
@@ -67,13 +68,14 @@ public final class QuickShapeScreen extends Screen {
                 case EMPTY -> Component.translatable("gui.shapeexcavator.quick.empty", ShapeExcavatorClient.editorKeyLabel());
                 default -> Component.translatable("gui.shapeexcavator.quick.unavailable");
             };
+            ShapeThumbnail thumbnail = null;
             if (config != null && ShapeGenerator.generate(config, ClientState.limits()) instanceof ShapeGenerator.Valid valid) {
                 var shape = valid.shape();
-                details = Component.translatable("gui.shapeexcavator.quick.details",
-                        shape.width(), shape.height(), shape.depth(), shape.count());
+                details = Component.translatable("hud.shapeexcavator.preview.short", shape.count());
+                thumbnail = ShapeThumbnail.of(shape.mask());
                 enabled = true;
             }
-            return new WheelEntry(entry, config, name, details,
+            return new WheelEntry(entry, config, name, details, thumbnail,
                     QuickMenuLogic.isActive(entry, active, config), enabled);
         }).toList();
         hover = new double[entries.size()];
@@ -122,7 +124,9 @@ public final class QuickShapeScreen extends Screen {
             QuickShapeAction.start(null, false, selection.name());
         } else {
             boolean preview = selection.entry().kind() == QuickMenuLogic.Kind.LAST ? last.worldPreview() : worldPreview;
-            QuickShapeAction.start(selection.config(), preview, selection.name());
+            if (selection.entry().kind() == QuickMenuLogic.Kind.PRESET) {
+                QuickShapeAction.startPreset(selection.config(), preview, selection.entry().name());
+            } else QuickShapeAction.start(selection.config(), preview, selection.name());
         }
     }
 
@@ -210,26 +214,50 @@ public final class QuickShapeScreen extends Screen {
         }
         renderHub(g, l, selected < 0 ? null : entries.get(selected), fade);
         g.pose().popPose();
-        line(g, Component.translatable("gui.shapeexcavator.quick.hint", ShapeExcavatorClient.editorKeyLabel()),
-                l.centerX(), l.footerY(), width - 8, 0.8 * l.scale(), alpha(TEXT, fade));
-        if (l.pages() > 1) {
+        if (l.showInstructions()) line(g,
+                Component.translatable("gui.shapeexcavator.quick.hint", ShapeExcavatorClient.editorKeyLabel()),
+                l.centerX(), l.instructionsY(), width - 8, 0.8 * l.scale(), alpha(TEXT, fade));
+        if (l.showInstructions() && l.pages() > 1) {
             line(g, Component.translatable("gui.shapeexcavator.quick.page", l.page() + 1, l.pages()),
-                    l.centerX(), l.footerY() + 12 * l.scale(), width - 8, 0.7 * l.scale(), alpha(MUTED, fade));
+                    l.centerX(), l.instructionsY() + 12 * l.scale(), width - 8, 0.7 * l.scale(), alpha(MUTED, fade));
         }
         g.flush();
     }
 
     private void renderHub(GuiGraphics g, QuickMenuLogic.Layout l, WheelEntry hovered, double fade) {
-        Component name = hovered == null ? Component.translatable("gui.shapeexcavator.quick.cancel") : hovered.name();
-        Component details = hovered == null ? Component.empty() : hovered.details();
-        // Fit the full summary by scaling down to the hub's chord; keep it on exactly one line.
-        double available = 2 * l.deadZone() - 8 * l.scale();
-        double nameScale = 0.75 * l.scale();
-        double detailScale = Math.min(0.6 * l.scale(), available / Math.max(1, font.width(details)));
-        line(g, name.copy().withStyle(ChatFormatting.BOLD), l.centerX(),
-                l.centerY() - (hovered == null ? 3 : 10) * l.scale(), available, nameScale, alpha(TEXT, fade));
-        if (hovered != null) line(g, details, l.centerX(), l.centerY() + 3 * l.scale(),
-                available, detailScale, alpha(MUTED, fade));
+        double s = l.scale();
+        double cx = l.centerX(), cy = l.centerY();
+        if (hovered == null) {
+            line(g, Component.translatable("gui.shapeexcavator.quick.cancel"), cx, cy - 4 * s,
+                    46 * s, 0.85 * s, alpha(TEXT, fade));
+            return;
+        }
+        if (hovered.entry().kind() == QuickMenuLogic.Kind.OFF) {
+            g.pose().pushPose();
+            g.pose().translate(cx - 10.5 * s, cy - 10.5 * s, 0);
+            g.pose().scale((float) s, (float) s, 1);
+            ShapeTypeIcons.drawOff(g, 0, 0, 3, alpha(TEXT, fade));
+            g.pose().popPose();
+            return;
+        }
+        // Keep the name on the upper chord and the count on the lower chord of the inner circle.
+        line(g, hovered.name().copy().withStyle(ChatFormatting.BOLD), cx, cy - 21 * s,
+                30 * s, 0.85 * s, alpha(TEXT, fade));
+        if (hovered.thumbnail() != null) {
+            VertexConsumer vertices = g.bufferSource().getBuffer(RenderType.gui());
+            Matrix4f matrix = g.pose().last().pose();
+            for (var face : hovered.thumbnail().faces()) {
+                int color = alpha(0xFF000000 | face.rgb(), fade);
+                for (var point : face.points()) {
+                    vertices.addVertex(matrix, (float) (cx + point.x() * 12 * s),
+                            (float) (cy + point.y() * 12 * s), 0).setColor(color);
+                }
+            }
+            g.flush();
+        }
+        double detailScale = hovered.thumbnail() == null ? 0.65 * s
+                : Math.min(0.65 * s, 32 * s / Math.max(1, font.width(hovered.details())));
+        line(g, hovered.details(), cx, cy + 14 * s, 32 * s, detailScale, alpha(MUTED, fade));
     }
 
     private void line(GuiGraphics g, Component text, double x, double y, double maxWidth, double scale, int color) {

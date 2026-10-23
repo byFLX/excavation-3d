@@ -2,7 +2,6 @@ package com.byflx.shapeexcavator.editor;
 
 import com.byflx.shapeexcavator.shape.ShapeConfig;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -80,7 +79,9 @@ public final class QuickMenuLogic {
             }
             return 0;
         }
-        public double footerY() { return centerY + radius + 12 * scale(); }
+        /** Instructions live above the local vignette, never in the survival HUD below the wheel. */
+        public double instructionsY() { return centerY - 102 * scale() - 14; }
+        public boolean showInstructions() { return scale() >= 0.8 && instructionsY() >= 6; }
         /** One-based visible number keys; unused keys on the final page do nothing. */
         public int numberSelection(int number) {
             return number >= 1 && number <= segments() ? offset() + number - 1 : -1;
@@ -154,7 +155,7 @@ public final class QuickMenuLogic {
         List<Entry> result = new ArrayList<>();
         result.add(new Entry(Kind.OFF, ""));
         if (hasLast) result.add(new Entry(Kind.LAST, ""));
-        presets.stream().sorted(String.CASE_INSENSITIVE_ORDER.thenComparing(Comparator.naturalOrder()))
+        PresetShortcuts.sorted(presets).stream()
                 .forEach(name -> result.add(new Entry(Kind.PRESET, name)));
         if (presets.isEmpty()) result.add(new Entry(Kind.EMPTY, ""));
         return List.copyOf(result);

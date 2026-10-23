@@ -4,6 +4,8 @@ import com.byflx.shapeexcavator.ShapeExcavator;
 import com.byflx.shapeexcavator.data.ToolShapeData;
 import com.byflx.shapeexcavator.net.BypassPayload;
 import com.byflx.shapeexcavator.editor.QuickMenuLogic;
+import com.byflx.shapeexcavator.editor.PresetShortcuts;
+import com.byflx.shapeexcavator.shape.ShapeConfig;
 import com.byflx.shapeexcavator.client.screen.QuickShapeScreen;
 import com.byflx.shapeexcavator.registry.ModTags;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -34,6 +36,8 @@ public final class ShapeExcavatorClient {
     private static final String CATEGORY = "key.categories.shapeexcavator";
     private static KeyMapping openEditor;
     private static KeyMapping singleBlock;
+    private static KeyMapping toggleShape, nextPreset, previousPreset;
+    private static final KeyMapping[] presetSlots = new KeyMapping[5];
     private static boolean sentBypass;
     private static final QuickMenuLogic.Hold editorHold = new QuickMenuLogic.Hold();
     private static boolean suppressEditor;
@@ -71,6 +75,51 @@ public final class ShapeExcavatorClient {
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_LEFT_SHIFT, CATEGORY);
         event.register(openEditor);
         event.register(singleBlock);
+        toggleShape = registerUnbound(event, "toggle_shape");
+        nextPreset = registerUnbound(event, "next_preset");
+        previousPreset = registerUnbound(event, "previous_preset");
+        for (int i = 0; i < presetSlots.length; i++) {
+            presetSlots[i] = registerUnbound(event, "apply_preset_" + (i + 1));
+        }
+    }
+
+    private static KeyMapping registerUnbound(RegisterKeyMappingsEvent event, String name) {
+        KeyMapping mapping = new KeyMapping("key.shapeexcavator." + name, KeyConflictContext.IN_GAME,
+                InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), CATEGORY);
+        event.register(mapping);
+        return mapping;
+    }
+
+    /** Drain every mapping even while blocked: clicks must never replay after a screen or request closes. */
+    private static void shortcuts(Minecraft mc) {
+        KeyMapping[] mappings = {toggleShape, nextPreset, previousPreset,
+                presetSlots[0], presetSlots[1], presetSlots[2], presetSlots[3], presetSlots[4]};
+        int selected = -1;
+        for (int i = 0; i < mappings.length; i++) {
+            if (mappings[i] == null) continue;
+            while (mappings[i].consumeClick()) if (selected < 0) selected = i;
+        }
+        if (selected < 0 || mc.screen != null || mc.player == null || QuickShapeAction.busy()
+                || !mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) return;
+        ToolShapeData data = ModTags.shapeOf(mc.player.getMainHandItem());
+        ShapeConfig active = data == null ? null : data.config().orElse(null);
+        if (selected == 0) {
+            var last = ClientState.lastShape(mc.player.getUUID());
+            switch (PresetShortcuts.toggle(active != null, last.isPresent())) {
+                case OFF -> QuickShapeAction.start(null, false, Component.translatable("gui.shapeexcavator.quick.off"));
+                case RESTORE -> QuickShapeAction.start(last.orElseThrow().config(), last.orElseThrow().worldPreview(),
+                        Component.translatable("gui.shapeexcavator.quick.last"));
+                case NONE -> { }
+            }
+            return;
+        }
+        PresetRepository presets = PresetRepository.get();
+        var name = selected <= 2
+                ? PresetShortcuts.cycle(presets.names(), presets::find, active, selected == 1 ? 1 : -1,
+                        QuickShapeAction.confirmedPresetName())
+                : PresetShortcuts.nth(presets.names(), selected - 2);
+        name.ifPresent(n -> presets.find(n).ifPresent(config -> QuickShapeAction.startPreset(config,
+                data != null && data.worldPreview(), n)));
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {
@@ -98,9 +147,11 @@ public final class ShapeExcavatorClient {
                 }
             }
         }
+        shortcuts(minecraft);
         QuickShapeAction.tick();
         syncBypass(minecraft);
         WorldPreview.tick(minecraft);
+        ToolHud.tick(minecraft);
     }
 
     /**

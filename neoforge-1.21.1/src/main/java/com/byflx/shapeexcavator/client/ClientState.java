@@ -78,6 +78,7 @@ public final class ClientState {
         editor = null;
         bypassActive = false;
         QuickShapeAction.reset();
+        ToolHud.reset();
         LAST.clearPending();
     }
 }

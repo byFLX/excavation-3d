@@ -12,6 +12,7 @@ import com.byflx.shapeexcavator.registry.ModTags;
 import com.byflx.shapeexcavator.shape.ShapeConfig;
 import com.byflx.shapeexcavator.shape.ShapeGenerator;
 import com.byflx.shapeexcavator.text.ShapeTexts;
+import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -20,7 +21,8 @@ import net.neoforged.neoforge.network.PacketDistributor;
 /** Quick selection uses the editor's existing Begin -> session -> Apply/Remove -> confirmation protocol. */
 public final class QuickShapeAction {
     private static QuickShapeAction pending;
-    private static int feedbackUntilGuiTick;
+    private record PresetSelection(UUID player, int slot, Object item, String name, ShapeConfig config) { }
+    private static PresetSelection confirmedPreset;
     private final SessionHandshake handshake = new SessionHandshake();
     private final int slot;
     private final ItemStack stack;
@@ -28,30 +30,48 @@ public final class QuickShapeAction {
     private final ToolShapeData previous;
     private final boolean worldPreview;
     private final Component selectionName;
+    private final String presetName;
     private int replyTicks;
     private boolean submitted;
 
-    private QuickShapeAction(Minecraft mc, ShapeConfig config, boolean worldPreview, Component selectionName) {
+    private QuickShapeAction(Minecraft mc, ShapeConfig config, boolean worldPreview, Component selectionName, String presetName) {
         slot = mc.player.getInventory().selected;
         stack = mc.player.getMainHandItem();
         previous = stack.get(ModComponents.TOOL_SHAPE.get());
         this.config = config;
         this.worldPreview = worldPreview;
         this.selectionName = selectionName.copy();
+        this.presetName = presetName;
     }
 
     public static boolean busy() { return pending != null; }
 
-    /** Vanilla action-bar messages last 60 GUI ticks; leave that space clear for the whole result. */
-    static boolean showingFeedback() {
-        return Minecraft.getInstance().gui.getGuiTicks() < feedbackUntilGuiTick;
+    /** The exact accepted revision prevents a cursor from following an editor change or another tool. */
+    static String confirmedPresetName() {
+        Minecraft mc = Minecraft.getInstance();
+        if (confirmedPreset == null || mc.player == null) return null;
+        ToolShapeData data = ModTags.shapeOf(mc.player.getMainHandItem());
+        return confirmedPreset.player().equals(mc.player.getUUID())
+                && confirmedPreset.slot() == mc.player.getInventory().selected
+                && confirmedPreset.item() == mc.player.getMainHandItem().getItem()
+                && data != null && data.config().filter(confirmedPreset.config()::equals).isPresent()
+                ? confirmedPreset.name() : null;
+    }
+
+    public static void startPreset(ShapeConfig config, boolean worldPreview, String name) {
+        start(config, worldPreview, Component.literal(name), name);
     }
 
     /** Null config means Off. No local item component is ever changed. */
     public static void start(ShapeConfig config, boolean worldPreview, Component selectionName) {
+        start(config, worldPreview, selectionName, null);
+    }
+
+    private static void start(ShapeConfig config, boolean worldPreview, Component selectionName, String presetName) {
         Minecraft mc = Minecraft.getInstance();
-        if (busy() || mc.player == null || !mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) return;
-        pending = new QuickShapeAction(mc, config, worldPreview, selectionName);
+        if (busy() || mc.screen != null || mc.player == null || mc.getConnection() == null
+                || !mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) return;
+        pending = new QuickShapeAction(mc, config, worldPreview, selectionName, presetName);
         PacketDistributor.sendToServer(new BeginEditPayload(pending.handshake.start(), pending.slot));
     }
 
@@ -105,6 +125,13 @@ public final class QuickShapeAction {
 
     public static void onResult(ApplyResultPayload payload) {
         if (pending == null || !pending.submitted || payload.sessionId() != pending.handshake.sessionId()) return;
+        if (payload.accepted()) {
+            Minecraft mc = Minecraft.getInstance();
+            confirmedPreset = pending.presetName != null && mc.player != null
+                    ? new PresetSelection(mc.player.getUUID(), pending.slot, pending.stack.getItem(),
+                            pending.presetName, pending.config.withRevision(payload.revision())) : null;
+            ToolHud.confirmedChange();
+        }
         finish(payload.accepted()
                 ? (pending.config == null ? Component.translatable("gui.shapeexcavator.quick.applied_off")
                         : Component.translatable("gui.shapeexcavator.quick.applied", pending.selectionName))
@@ -115,10 +142,9 @@ public final class QuickShapeAction {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
             mc.player.displayClientMessage(message, true);
-            feedbackUntilGuiTick = mc.gui.getGuiTicks() + 60;
         }
         pending = null;
     }
 
-    public static void reset() { pending = null; feedbackUntilGuiTick = 0; }
+    public static void reset() { pending = null; confirmedPreset = null; }
 }
