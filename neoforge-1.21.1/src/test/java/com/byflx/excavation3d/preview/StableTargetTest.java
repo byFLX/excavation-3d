@@ -52,4 +52,17 @@ class StableTargetTest {
         assertEquals("floor", target.select("floor", 0, true));
         assertNull(target.select(null, 1, false));
     }
+
+    @Test void anUnsuitableStartClearsThePreviousPreviewAndItsPendingSwitch() {
+        var target = new StableTarget<String>();
+        target.select("stone", 10, true);
+        target.select("nearby stone", 11, true);
+        target.reset(); // WorldPreview rejects a known unsuitable hit before applying miss grace.
+        assertNull(target.select(null, 11, true));
+        assertNull(target.select(null, 12, true));
+        assertEquals("stone", target.select("stone", 12, true));
+        assertEquals("stone", target.select("nearby stone", 13, true));
+        assertEquals("stone", target.select("nearby stone", 15, true));
+        assertEquals("nearby stone", target.select("nearby stone", 16, true));
+    }
 }

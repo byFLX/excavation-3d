@@ -1,6 +1,7 @@
 package com.byflx.excavation3d.client;
 
 import com.byflx.excavation3d.data.ToolShapeData;
+import com.byflx.excavation3d.excavation.ToolSuitability;
 import com.byflx.excavation3d.preview.CellCategory;
 import com.byflx.excavation3d.preview.ContourEdges;
 import com.byflx.excavation3d.preview.PreviewFill;
@@ -11,7 +12,6 @@ import com.byflx.excavation3d.shape.Orientation;
 import com.byflx.excavation3d.shape.ShapeConfig;
 import com.byflx.excavation3d.shape.ShapeGenerator;
 import com.byflx.excavation3d.shape.ShapeLimits;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.EnumMap;
@@ -35,7 +35,6 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
-import org.joml.Matrix4fStack;
 
 /**
  * The in-world preview at the targeted start block (plan §8). It uses the same generator, the same
@@ -145,9 +144,15 @@ public final class WorldPreview {
             targetLevel = level;
             targetSlot = player.getInventory().selected;
         }
-        Target candidate = minecraft.hitResult instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
-                && usableStart(level, player, hit.getBlockPos())
-                ? new Target(config, limits, hit.getBlockPos().immutable(), hit.getDirection(), player.getDirection()) : null;
+        BlockHitResult hit = minecraft.hitResult instanceof BlockHitResult blockHit
+                && blockHit.getType() == HitResult.Type.BLOCK ? blockHit : null;
+        if (hit != null && !usableStart(level, player, hit.getBlockPos())) {
+            // A known unsuitable start must not inherit the old preview through miss hysteresis.
+            clearTarget();
+            return;
+        }
+        Target candidate = hit == null ? null
+                : new Target(config, limits, hit.getBlockPos().immutable(), hit.getDirection(), player.getDirection());
         Target previous = stableTarget.current();
         // Never keep a mined/unloaded start block, a machine, or a target left behind out of reach.
         if (previous != null && !usableStart(level, player, previous.origin())) {
@@ -198,7 +203,9 @@ public final class WorldPreview {
                         > Math.pow(player.blockInteractionRange() + 1, 2)) return false;
         BlockState state = level.getBlockState(pos);
         return !state.isAir() && !state.hasBlockEntity() && !(state.getBlock() instanceof LiquidBlock)
-                && state.getDestroySpeed(level, pos) >= 0;
+                && state.getDestroySpeed(level, pos) >= 0
+                && ToolSuitability.isIntendedFor(player.getMainHandItem(), state)
+                && (!state.requiresCorrectToolForDrops() || player.getMainHandItem().isCorrectToolForDrops(state));
     }
 
     /** A client-side estimate of the server's checks; protection is unknown here and not guessed. */
@@ -217,10 +224,11 @@ public final class WorldPreview {
         if (state.hasBlockEntity() || state.getBlock() instanceof LiquidBlock || state.getDestroySpeed(level, pos) < 0) {
             return CellCategory.EXCLUDED;
         }
+        if (!ToolSuitability.isIntendedFor(tool, state)
+                || (state.requiresCorrectToolForDrops() && !tool.isCorrectToolForDrops(state))) {
+            return CellCategory.EXCLUDED;
+        }
         if (!player.isCreative()) {
-            if (state.requiresCorrectToolForDrops() && !tool.isCorrectToolForDrops(state)) {
-                return CellCategory.EXCLUDED;
-            }
             if (state.getDestroyProgress(player, level, pos) < startProgress * 0.9999F) {
                 return CellCategory.EXCLUDED;
             }
@@ -244,47 +252,37 @@ public final class WorldPreview {
         double baseY = origin.getY() - camera.y;
         double baseZ = origin.getZ() - camera.z;
 
-        // Draw like the vanilla block outline: the frame's view matrix on the global model-view,
-        // the frame's projection, and camera-relative vertices. Both come from the event, so the
-        // geometry stays on the blocks whatever renderer or camera mod produced them.
-        Matrix4fStack modelView = RenderSystem.getModelViewStack();
-        modelView.pushMatrix();
-        modelView.set(event.getModelViewMatrix());
-        RenderSystem.applyModelViewMatrix();
-        RenderSystem.backupProjectionMatrix();
-        RenderSystem.setProjectionMatrix(event.getProjectionMatrix(), RenderSystem.getVertexSorting());
-        try {
-            PoseStack.Pose pose = new PoseStack().last();
-            MultiBufferSource.BufferSource buffers = minecraft.renderBuffers().bufferSource();
+        // Borrow the renderer's LIVE world matrices, like the vanilla block outline. Do not
+        // replace them with the event arguments: camera/shader mods can add transforms to the
+        // active state. Losing a forward camera translation puts this depth-tested overlay behind
+        // the wall; a backward translation instead puts it in front. Target hysteresis cannot fix
+        // that. FOV, bobbing and shader projection adjustments must stay exactly as for the world.
+        PoseStack.Pose pose = new PoseStack().last();
+        MultiBufferSource.BufferSource buffers = minecraft.renderBuffers().bufferSource();
 
-            VertexConsumer quads = buffers.getBuffer(PreviewRenderTypes.FILL);
-            for (PreviewFill.Face face : fill.faces()) {
-                face(quads, pose, baseX + face.x(), baseY + face.y(), baseZ + face.z(), face.side(), FILL);
-            }
-            fill.start().ifPresent(start -> {
-                for (PreviewFill.Side side : PreviewFill.Side.values()) {
-                    face(quads, pose, baseX + start.x(), baseY + start.y(), baseZ + start.z(), side, START_FILL);
-                }
-            });
-            buffers.endBatch(PreviewRenderTypes.FILL);
-
-            VertexConsumer lines = buffers.getBuffer(RenderType.lines());
-            for (ContourEdges.Edge edge : contour) {
-                edge(lines, pose, baseX + edge.x(), baseY + edge.y(), baseZ + edge.z(), edge.axis());
-            }
-            fill.start().ifPresent(start -> {
-                double x = baseX + start.x();
-                double y = baseY + start.y();
-                double z = baseZ + start.z();
-                LevelRenderer.renderLineBox(new PoseStack(), lines, new AABB(x, y, z, x + 1, y + 1, z + 1).inflate(0.004),
-                        START_LINE[0], START_LINE[1], START_LINE[2], START_LINE[3]);
-            });
-            buffers.endBatch(RenderType.lines());
-        } finally {
-            RenderSystem.restoreProjectionMatrix();
-            modelView.popMatrix();
-            RenderSystem.applyModelViewMatrix();
+        VertexConsumer quads = buffers.getBuffer(PreviewRenderTypes.FILL);
+        for (PreviewFill.Face face : fill.faces()) {
+            face(quads, pose, baseX + face.x(), baseY + face.y(), baseZ + face.z(), face.side(), FILL);
         }
+        fill.start().ifPresent(start -> {
+            for (PreviewFill.Side side : PreviewFill.Side.values()) {
+                face(quads, pose, baseX + start.x(), baseY + start.y(), baseZ + start.z(), side, START_FILL);
+            }
+        });
+        buffers.endBatch(PreviewRenderTypes.FILL);
+
+        VertexConsumer lines = buffers.getBuffer(RenderType.lines());
+        for (ContourEdges.Edge edge : contour) {
+            edge(lines, pose, baseX + edge.x(), baseY + edge.y(), baseZ + edge.z(), edge.axis());
+        }
+        fill.start().ifPresent(start -> {
+            double x = baseX + start.x();
+            double y = baseY + start.y();
+            double z = baseZ + start.z();
+            LevelRenderer.renderLineBox(new PoseStack(), lines, new AABB(x, y, z, x + 1, y + 1, z + 1).inflate(0.004),
+                    START_LINE[0], START_LINE[1], START_LINE[2], START_LINE[3]);
+        });
+        buffers.endBatch(RenderType.lines());
     }
 
     private static void edge(VertexConsumer lines, PoseStack.Pose pose, double x, double y, double z,

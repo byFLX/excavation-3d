@@ -191,8 +191,9 @@ public final class ExcavationService {
             return;
         }
         BlockState state = event.getState();
-        if (state.hasBlockEntity()) {
-            // Storage and machines never start an area.
+        if (state.hasBlockEntity() || !ToolSuitability.isIntendedFor(tool, state)
+                || (state.requiresCorrectToolForDrops() && !tool.isCorrectToolForDrops(state))) {
+            // Machines, unrelated materials and insufficient tiers keep vanilla single-block mining.
             return;
         }
         if (player.isCreative()) {
@@ -392,12 +393,12 @@ public final class ExcavationService {
                 || player.blockActionRestricted(level, pos, player.gameMode.getGameModeForPlayer())) {
             return SkipReason.PROTECTED;
         }
+        ItemStack tool = player.getMainHandItem();
+        if (!ToolSuitability.isIntendedFor(tool, state)
+                || (state.requiresCorrectToolForDrops() && !tool.isCorrectToolForDrops(state))) {
+            return SkipReason.WRONG_TOOL;
+        }
         if (!player.isCreative()) {
-            // Suitability and tier come from the real tool (plan §2a), e.g. stone with a shovel.
-            ItemStack tool = player.getMainHandItem();
-            if (state.requiresCorrectToolForDrops() && !tool.isCorrectToolForDrops(state)) {
-                return SkipReason.WRONG_TOOL;
-            }
             // V1 rule: nothing that takes longer to mine than the start block (no obsidian via dirt).
             if (state.getDestroyProgress(player, level, pos) < operation.startProgress * 0.9999F) {
                 return SkipReason.HARDER_THAN_START;

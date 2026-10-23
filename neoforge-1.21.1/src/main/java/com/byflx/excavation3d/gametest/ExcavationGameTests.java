@@ -238,6 +238,54 @@ public final class ExcavationGameTests {
         });
     }
 
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void pickaxeOnPlanksMinesOnlyTheStart(GameTestHelper helper) {
+        buildWall(helper, Blocks.OAK_PLANKS);
+        TestPlayer player = playerWithTool(helper, Items.IRON_PICKAXE, SQUARE);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            for (BlockPos pos : wall()) {
+                if (pos.equals(START)) {
+                    helper.assertBlockNotPresent(Blocks.OAK_PLANKS, pos);
+                } else {
+                    helper.assertBlockPresent(Blocks.OAK_PLANKS, pos);
+                }
+            }
+            expectItems(helper, Items.OAK_PLANKS, 1);
+            expectDamage(helper, player, 1);
+            if (player.resultCount != 0 || player.lastMessage != null) {
+                helper.fail("An unsuitable start must stay a silent vanilla single-block break");
+            }
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void pickaxeShapeSkipsPlanksAndReportsIt(GameTestHelper helper) {
+        buildWall(helper, Blocks.STONE);
+        BlockPos planks = START.west();
+        helper.setBlock(planks, Blocks.OAK_PLANKS);
+        TestPlayer player = playerWithTool(helper, Items.IRON_PICKAXE, SQUARE);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            helper.assertBlockPresent(Blocks.OAK_PLANKS, planks);
+            for (BlockPos pos : wall()) {
+                if (inSquare(pos) && !pos.equals(planks)) {
+                    helper.assertBlockNotPresent(Blocks.STONE, pos);
+                } else if (!pos.equals(planks)) {
+                    helper.assertBlockPresent(Blocks.STONE, pos);
+                }
+            }
+            expectItems(helper, Items.COBBLESTONE, 8);
+            expectItems(helper, Items.OAK_PLANKS, 0);
+            expectDamage(helper, player, 8);
+            expectResult(helper, player, 8, Map.of(SkipReason.WRONG_TOOL, 1));
+            finish(helper, player);
+        });
+    }
+
     /** Extra blocks the real tool is not correct for stay and appear in the server result. */
     @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
     public static void shovelShapeSkipsStoneAndReportsIt(GameTestHelper helper) {
