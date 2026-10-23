@@ -1,21 +1,33 @@
 package com.byflx.shapeexcavator.editor;
 
+import com.byflx.shapeexcavator.shape.ShapeConfig;
+import com.byflx.shapeexcavator.shape.ShapeParams;
+import com.byflx.shapeexcavator.shape.ShapeTransform;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class QuickMenuLogicTest {
-    @Test void crosshairAnchorAndEntireMenuFitTheMinimumGuiSizeWithFooterSpace() {
-        for (int width : new int[] {320, 427, 640, 1046}) for (int height : new int[] {240, 274, 480, 824}) {
-            for (int count : new int[] {1, 4, 66}) {
-                var layout = QuickMenuLogic.layout(width, height, count, 1000);
-                assertEquals(width / 2, layout.centerX());
-                assertEquals(height / 2, layout.centerY());
-                assertTrue(layout.x() >= 4 && layout.x() + layout.width() + 4 <= width);
-                assertTrue(layout.y() - 16 >= 0);
-                assertTrue(layout.y() + layout.rows() * 20 + 54 <= height);
-                assertEquals(-1, layout.highlighted(layout.centerX(), layout.centerY()));
+    @Test void crosshairAnchorAndEntireWheelFitAllEffectiveGuiScalesWithFooterSpace() {
+        for (int windowWidth : new int[] {854, 1280, 1920}) {
+            for (int windowHeight : new int[] {480, 720, 1080}) {
+                for (int requestedScale = 1; requestedScale <= 4; requestedScale++) {
+                    int scale = Math.min(requestedScale, Math.min(windowWidth / 320, windowHeight / 240));
+                    int width = (int) Math.ceil((double) windowWidth / scale);
+                    int height = (int) Math.ceil((double) windowHeight / scale);
+                    for (int count : new int[] {0, 1, 4, 8, 9, 66}) {
+                        var layout = QuickMenuLogic.layout(width, height, count, 1000);
+                        assertEquals(width / 2, layout.centerX());
+                        assertEquals(height / 2, layout.centerY());
+                        assertTrue(layout.centerX() - layout.radius() - 5 >= 0);
+                        assertTrue(layout.centerX() + layout.radius() + 5 <= width);
+                        assertTrue(layout.centerY() - layout.radius() - 28 >= 0);
+                        assertTrue(layout.footerY() + 24 + 9 <= height);
+                        assertTrue(layout.deadZone() > 0 && layout.deadZone() < layout.radius());
+                        assertEquals(-1, layout.highlighted(layout.centerX(), layout.centerY()));
+                    }
+                }
             }
         }
     }
@@ -38,25 +50,129 @@ class QuickMenuLogicTest {
         assertEquals(QuickMenuLogic.Gesture.NONE, hold.update(false, 500));
     }
 
-    @Test void entryUnderMouseIsHighlightedAndTheCentreAndOutsideCancel() {
-        var layout = QuickMenuLogic.layout(640, 360, 4, 0);
-        assertEquals(-1, layout.highlighted(320, 180));
-        assertEquals(0, layout.highlighted(layout.x(), layout.y()));
-        assertEquals(3, layout.highlighted(layout.x() + 10, layout.y() + 79));
-        assertEquals(-1, layout.highlighted(layout.x() + 10, layout.y() + 80));
-        assertEquals(-1, layout.highlighted(layout.x() + layout.width(), layout.y()));
+    @Test void anglesSelectClockwiseFromUpForEverySegmentCount() {
+        for (int count = 1; count <= QuickMenuLogic.PAGE_SIZE; count++) {
+            var layout = QuickMenuLogic.layout(640, 360, count, 0);
+            for (int segment = 0; segment < count; segment++) {
+                double angle = layout.angle(segment);
+                assertEquals(segment, QuickMenuLogic.segmentAtAngle(angle, count));
+                assertEquals(segment, QuickMenuLogic.segmentAtAngle(angle + Math.PI * 8, count));
+                assertEquals(segment, QuickMenuLogic.segmentAtAngle(angle - Math.PI * 8, count));
+                assertEquals(segment, layout.highlighted(layout.centerX() + Math.cos(angle) * 10000,
+                        layout.centerY() + Math.sin(angle) * 10000));
+                double boundary = angle + Math.PI / count;
+                assertEquals(segment, QuickMenuLogic.segmentAtAngle(boundary - 0.000001, count));
+                assertEquals((segment + 1) % count, QuickMenuLogic.segmentAtAngle(boundary + 0.000001, count));
+            }
+        }
+        assertEquals(0, QuickMenuLogic.segmentAtAngle(-Math.PI / 2, 4));
+        assertEquals(1, QuickMenuLogic.segmentAtAngle(0, 4));
+        assertEquals(2, QuickMenuLogic.segmentAtAngle(Math.PI / 2, 4));
+        assertEquals(3, QuickMenuLogic.segmentAtAngle(Math.PI, 4));
+        assertEquals(-1, QuickMenuLogic.segmentAtAngle(0, 0));
+        assertEquals(-1, QuickMenuLogic.segmentAtAngle(Double.NaN, 8));
+        assertEquals(-1, QuickMenuLogic.segmentAtAngle(Double.POSITIVE_INFINITY, 8));
     }
 
-    @Test void everyPresetIsReachableInASmallWindowAndScrollIsBounded() {
-        for (int offset = 0; offset < 66; offset++) {
-            var layout = QuickMenuLogic.layout(320, 240, 66, offset);
-            assertTrue(layout.y() >= 0);
-            assertTrue(layout.y() + layout.rows() * 20 <= 240);
-            assertEquals(layout.offset(), layout.highlighted(layout.x() + 2, layout.y() + 2));
+    @Test void centreAndDeadZoneBoundaryCancelInEveryDirection() {
+        var layout = QuickMenuLogic.layout(320, 240, 8, 0);
+        assertEquals(-1, layout.highlighted(layout.centerX(), layout.centerY()));
+        for (int segment = 0; segment < 8; segment++) {
+            double a = layout.angle(segment);
+            double inside = layout.deadZone() - 0.001;
+            assertEquals(-1, layout.highlighted(layout.centerX() + Math.cos(a) * inside,
+                    layout.centerY() + Math.sin(a) * inside));
+            double outside = layout.deadZone() + 0.001;
+            assertEquals(segment, layout.highlighted(layout.centerX() + Math.cos(a) * outside,
+                    layout.centerY() + Math.sin(a) * outside));
         }
-        var lastPage = QuickMenuLogic.layout(320, 240, 66, 1000);
-        assertEquals(65, lastPage.highlighted(lastPage.x() + 2, lastPage.y() + (lastPage.rows() - 1) * 20 + 2));
-        assertEquals(0, QuickMenuLogic.layout(320, 240, 66, -1).offset());
+        assertEquals(-1, layout.highlighted(layout.centerX() + layout.deadZone(), layout.centerY()));
+        assertEquals(-1, QuickMenuLogic.layout(320, 240, 0, 0).highlighted(0, 0));
+    }
+
+    @Test void labelBoundsStayInsideTheRingEvenAtTheSidesOnTheSmallestGui() {
+        for (int height : new int[] {240, 360, 480, 1080}) {
+            for (int count = 1; count <= 8; count++) {
+                var layout = QuickMenuLogic.layout(427, height, count, 0);
+                for (int segment = 0; segment < count; segment++) {
+                    int halfWidth = layout.labelWidth(segment) / 2;
+                    assertTrue(halfWidth >= 12, "At least a short name fits");
+                    for (int x : new int[] {-halfWidth, halfWidth}) {
+                        for (int y : new int[] {4, 13}) {
+                            double distance = Math.hypot(layout.labelX(segment) + x - layout.centerX(),
+                                    layout.labelY(segment) + y - layout.centerY());
+                            assertTrue(distance < layout.radius() - 1);
+                            assertTrue(distance > layout.deadZone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test void everyEntryIsReachableOnceAndPagesClampIncludingPartialLastPage() {
+        for (int count = 1; count <= 66; count++) {
+            boolean[] reached = new boolean[count];
+            var first = QuickMenuLogic.layout(320, 240, count, -1);
+            assertEquals(0, first.page());
+            assertEquals((count + 7) / 8, first.pages());
+            for (int page = 0; page < first.pages(); page++) {
+                var layout = QuickMenuLogic.layout(320, 240, count, page);
+                assertEquals(page * 8, layout.offset());
+                assertTrue(layout.segments() > 0 && layout.segments() <= 8);
+                for (int segment = 0; segment < layout.segments(); segment++) {
+                    double a = layout.angle(segment);
+                    int index = layout.highlighted(layout.centerX() + Math.cos(a) * layout.labelRadius(),
+                            layout.centerY() + Math.sin(a) * layout.labelRadius());
+                    assertEquals(layout.offset() + segment, index);
+                    assertFalse(reached[index]);
+                    reached[index] = true;
+                }
+            }
+            for (boolean seen : reached) assertTrue(seen);
+            assertEquals(first.pages() - 1, QuickMenuLogic.layout(320, 240, count, 1000).page());
+        }
+        assertEquals(1, QuickMenuLogic.layout(320, 240, 8, 0).pages());
+        assertEquals(2, QuickMenuLogic.layout(320, 240, 9, 0).pages());
+        assertEquals(2, QuickMenuLogic.layout(320, 240, 66, 100).segments());
+    }
+
+    @Test void offIsActiveOnlyWithoutAShapeAndOtherEntriesMatchByValue() {
+        var off = new QuickMenuLogic.Entry(QuickMenuLogic.Kind.OFF, "");
+        var last = new QuickMenuLogic.Entry(QuickMenuLogic.Kind.LAST, "");
+        var preset = new QuickMenuLogic.Entry(QuickMenuLogic.Kind.PRESET, "Saved");
+        var shape = ShapeConfig.of(new ShapeParams.Cuboid(5, 3, 1));
+        var other = ShapeConfig.of(new ShapeParams.Cuboid(3, 3, 1));
+        assertTrue(QuickMenuLogic.isActive(off, null, null));
+        assertFalse(QuickMenuLogic.isActive(off, shape, null));
+        for (var entry : List.of(last, preset)) {
+            assertTrue(QuickMenuLogic.isActive(entry, shape.withRevision(42), shape.withRevision(0)));
+            assertFalse(QuickMenuLogic.isActive(entry, shape, other));
+            assertFalse(QuickMenuLogic.isActive(entry, shape, shape.withTransform(new ShapeTransform(1, false))));
+            assertFalse(QuickMenuLogic.isActive(entry, null, shape));
+            assertFalse(QuickMenuLogic.isActive(entry, shape, null));
+            assertFalse(QuickMenuLogic.isActive(entry, null, null));
+        }
+    }
+
+    @Test void labelsFitWithoutWrappingOrBreakingUnicodeAndHintsPreferCompactText() {
+        java.util.function.ToIntFunction<String> width = s -> s.codePointCount(0, s.length()) * 6;
+        assertEquals("Test", QuickMenuLogic.fitText("Test", 24, width));
+        assertEquals("Te…", QuickMenuLogic.fitText("Test", 18, width));
+        assertEquals("…", QuickMenuLogic.fitText("Test", 6, width));
+        assertEquals("", QuickMenuLogic.fitText("Test", 5, width));
+        assertEquals("", QuickMenuLogic.fitText("Test", 0, width));
+        assertEquals("", QuickMenuLogic.fitText("Test", -1, width));
+        assertEquals("A B C", QuickMenuLogic.fitText("A\nB\rC", 100, width));
+        assertEquals("😀…", QuickMenuLogic.fitText("😀😀😀", 12, width));
+        assertEquals("Full hint", QuickMenuLogic.fitHint("Full hint", "Short", 54, width));
+        assertEquals("Short", QuickMenuLogic.fitHint("Full hint", "Short", 30, width));
+        assertEquals("Sh…", QuickMenuLogic.fitHint("Full hint", "Short", 18, width));
+        for (int budget = 0; budget < 300; budget++) {
+            String fitted = QuickMenuLogic.fitText("Very long preset 😀 · 32 × 32 × 32 · 4096 blocks", budget, width);
+            assertTrue(width.applyAsInt(fitted) <= budget);
+            assertFalse(fitted.contains("\n"));
+        }
     }
 
     @Test void lastShapeIsFirstOffIsLastAndPlayersNeverShareTheirLastShape() {

@@ -28,7 +28,6 @@ import com.byflx.shapeexcavator.shape.ShapeLimits;
 import com.byflx.shapeexcavator.shape.ShapeType;
 import com.byflx.shapeexcavator.text.ShapeTexts;
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,14 +74,6 @@ public final class ShapeEditorScreen extends Screen {
     private static final int OK = 0x55FF55;
     private static final int ERROR = 0xFF5555;
     private static final int WARN = 0xFFDD55;
-
-    /** Procedural type icons: a front view for cuboid, plus and custom, a side view for the stairs. */
-    private static final Map<ShapeType, String[]> TYPE_ICONS = new EnumMap<>(Map.of(
-            ShapeType.CUBOID, new String[] {"#####", "#####", "#####", "#####", "#####"},
-            ShapeType.PLUS, new String[] {"..#..", "..#..", "#####", "..#..", "..#.."},
-            ShapeType.STAIR, new String[] {"#....", "##...", "###..", "####.", "#####"},
-            ShapeType.CORRIDOR, new String[] {"...##", "..###", ".###.", "###..", "##..."},
-            ShapeType.CUSTOM, new String[] {"#.#.#", ".#.#.", "#.#.#", ".#.#.", "#.#.#"}));
 
     private record RowLabel(Component text, int baseY) {
     }
@@ -288,7 +279,7 @@ public final class ShapeEditorScreen extends Screen {
             Component label = CommonComponents.optionNameValue(Component.translatable("gui.shapeexcavator.shape"),
                     ShapeTexts.typeName(type));
             IconButton button = IconButton.pattern(leftX + i * (w + gap), y, w, 20, label, b -> selectType(type),
-                    TYPE_ICONS.get(type));
+                    ShapeTypeIcons.pattern(type));
             button.setSelected(type == draft.type());
             scrolled(button, y);
         }

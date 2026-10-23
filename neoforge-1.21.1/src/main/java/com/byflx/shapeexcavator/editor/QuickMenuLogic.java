@@ -1,5 +1,6 @@
 package com.byflx.shapeexcavator.editor;
 
+import com.byflx.shapeexcavator.shape.ShapeConfig;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -7,14 +8,13 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.ToIntFunction;
 
-/** Pure timing, compact-list selection and per-player last-shape memory. */
+/** Pure timing, radial selection, text fitting and per-player last-shape memory. */
 public final class QuickMenuLogic {
     /** Adjust this constant to change the tap/hold boundary. */
     public static final long HOLD_MS = 250L;
-    public static final int CENTER_RADIUS = 18;
-    public static final int ROW_HEIGHT = 20;
-    public static final int MAX_ROWS = 9;
+    public static final int PAGE_SIZE = 8;
 
     public enum Gesture { NONE, TAP, HOLD }
 
@@ -39,26 +39,83 @@ public final class QuickMenuLogic {
         public void cancel() { pressed = false; opened = false; }
     }
 
-    /** A compact scrollable list to the right of the crosshair; the centre always cancels. */
-    public record Layout(int centerX, int centerY, int width, int count, int offset, int rows) {
-        public int x() { return centerX + CENTER_RADIUS + 6; }
-        public int y() { return centerY - rows * ROW_HEIGHT / 2; }
+    /** Segment zero points up, with the other segments following clockwise. */
+    public record Layout(int centerX, int centerY, int radius, int deadZone, int count, int page) {
+        public int pages() { return Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE); }
+        public int offset() { return page * PAGE_SIZE; }
+        public int segments() { return Math.min(PAGE_SIZE, count - offset()); }
+        public double angle(int segment) { return -Math.PI / 2 + segment * Math.PI * 2 / segments(); }
+        public double labelRadius() { return deadZone + (radius - deadZone) * 0.5; }
+        public int labelX(int segment) { return centerX + (int) Math.round(Math.cos(angle(segment)) * labelRadius()); }
+        public int labelY(int segment) { return centerY + (int) Math.round(Math.sin(angle(segment)) * labelRadius()); }
+        public int labelWidth(int segment) {
+            double neighbourSpace = 2 * labelRadius() * Math.sin(Math.PI / Math.max(2, segments())) - 10;
+            int x = Math.abs(labelX(segment) - centerX), y = labelY(segment) - centerY;
+            int farY = Math.max(Math.abs(y + 4), Math.abs(y + 13));
+            double circleEdge = Math.sqrt(Math.max(0, (radius - 2) * (radius - 2) - farY * farY));
+            int nearY = y + 4 <= 0 && y + 13 >= 0 ? 0 : Math.min(Math.abs(y + 4), Math.abs(y + 13));
+            double hubSpace = 100;
+            if (nearY < deadZone + 2) {
+                double hubEdge = Math.sqrt((deadZone + 2) * (deadZone + 2) - nearY * nearY);
+                hubSpace = 2 * (x - hubEdge - 1);
+            }
+            // Labels at the sides have less room than those at the top/bottom of the annulus.
+            return (int) Math.max(0, Math.min(hubSpace, Math.min(100,
+                    Math.min(neighbourSpace, 2 * (circleEdge - x - 1)))));
+        }
+        public int footerY() { return centerY + radius + 5; }
         public int highlighted(double mouseX, double mouseY) {
-            if (Math.hypot(mouseX - centerX, mouseY - centerY) <= CENTER_RADIUS
-                    || mouseX < x() || mouseX >= x() + width || mouseY < y()) return -1;
-            int row = (int)((mouseY - y()) / ROW_HEIGHT);
-            int index = offset + row;
-            return row < rows && index < count ? index : -1;
+            double dx = mouseX - centerX, dy = mouseY - centerY;
+            if (Math.hypot(dx, dy) <= deadZone || segments() == 0) return -1;
+            // Beyond the ring still selects by angle, like a weapon wheel.
+            return offset() + segmentAtAngle(Math.atan2(dy, dx), segments());
         }
     }
 
-    public static Layout layout(int screenWidth, int screenHeight, int count, int requestedOffset) {
-        // The list is centred vertically on the crosshair. Reserve room on both ends for
-        // the title and footer (page count, scroll hint, two instruction lines).
-        int rows = Math.min(count, Math.min(MAX_ROWS, Math.max(1, (screenHeight - 120) / ROW_HEIGHT)));
-        int offset = Math.max(0, Math.min(requestedOffset, count - rows));
-        return new Layout(screenWidth / 2, screenHeight / 2,
-                Math.max(20, Math.min(190, screenWidth / 2 - CENTER_RADIUS - 12)), count, offset, rows);
+    public static Layout layout(int screenWidth, int screenHeight, int count, int requestedPage) {
+        count = Math.max(0, count);
+        int pages = Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
+        // Minecraft caps the effective GUI scale at a minimum logical size of 320 x 240.
+        // Keep room above for shape details and below for three single-line hints.
+        int radius = Math.max(1, Math.min(124, Math.min(screenWidth / 2 - 8, screenHeight / 2 - 44)));
+        return new Layout(screenWidth / 2, screenHeight / 2, radius,
+                Math.max(1, (int) (radius * 0.43)), count, Math.clamp(requestedPage, 0, pages - 1));
+    }
+
+    /** Radians in screen coordinates (right = 0, down = pi/2), normalised over any turn. */
+    public static int segmentAtAngle(double angle, int count) {
+        if (count <= 0 || !Double.isFinite(angle)) return -1;
+        double turn = Math.PI * 2;
+        double shifted = (angle + Math.PI / 2 + Math.PI / count) % turn;
+        if (shifted < 0) shifted += turn;
+        return Math.min(count - 1, (int) (shifted / turn * count));
+    }
+
+    /** Tool and preset revisions differ; only the shape's configuration determines the marker. */
+    public static boolean isActive(Entry entry, ShapeConfig activeShape, ShapeConfig entryShape) {
+        return entry.kind() == Kind.OFF ? activeShape == null
+                : activeShape != null && entryShape != null
+                        && activeShape.withRevision(0).equals(entryShape.withRevision(0));
+    }
+
+    /** A single line, shortened at code-point boundaries with an ellipsis when needed. */
+    public static String fitText(String text, int maxWidth, ToIntFunction<String> width) {
+        if (maxWidth <= 0) return "";
+        text = text.replace('\n', ' ').replace('\r', ' ');
+        if (width.applyAsInt(text) <= maxWidth) return text;
+        String ellipsis = "…";
+        if (width.applyAsInt(ellipsis) > maxWidth) return "";
+        int end = text.length();
+        while (end > 0) {
+            end = text.offsetByCodePoints(end, -1);
+            String candidate = text.substring(0, end).stripTrailing() + ellipsis;
+            if (width.applyAsInt(candidate) <= maxWidth) return candidate;
+        }
+        return ellipsis;
+    }
+
+    public static String fitHint(String full, String compact, int maxWidth, ToIntFunction<String> width) {
+        return fitText(width.applyAsInt(full) <= maxWidth ? full : compact, maxWidth, width);
     }
 
     public enum Kind { LAST, PRESET, OFF }

@@ -21,7 +21,8 @@ public final class ToolHud {
 
     static void onRenderGui(RenderGuiEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null || minecraft.options.hideGui || minecraft.screen != null) {
+        if (minecraft.player == null || minecraft.options.hideGui || minecraft.screen != null
+                || QuickShapeAction.showingFeedback()) {
             return;
         }
         // Eligible tools also show Off, so the quick menu's normal-mining state is visible.

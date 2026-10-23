@@ -156,6 +156,11 @@ public final class ShapeExcavatorClient {
         suppressEditor = true;
     }
 
+    /** Keep wheel instructions correct when the editor key is rebound. */
+    public static Component editorKeyLabel() {
+        return openEditor == null ? Component.literal("V") : openEditor.getTranslatedKeyMessage();
+    }
+
     private static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         sentBypass = false;
         editorHold.cancel();
