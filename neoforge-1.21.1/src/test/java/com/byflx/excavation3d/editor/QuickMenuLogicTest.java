@@ -231,14 +231,16 @@ class QuickMenuLogicTest {
 
 
 
-    @Test void wheelOrderIsOffThenBuiltInsThenFavoritesInSaveOrder() {
-        var names = List.of("Zulu", "Alpha", "Beta");
+    @Test void wheelOrderIsOffThenOnlyFavoritesInSaveOrder() {
+        var names = List.of("Stairs", "Zulu", "Alpha", "Tunnel 1×2", "Beta");
         var entries = QuickMenuLogic.entries(names);
         assertEquals(QuickMenuLogic.Kind.OFF, entries.getFirst().kind());
-        assertEquals(BuiltInShapes.ALL.stream().map(BuiltInShapes.Entry::id).toList(),
-                entries.subList(1, 5).stream().map(QuickMenuLogic.Entry::name).toList());
-        assertEquals(names, entries.subList(5, 8).stream().map(QuickMenuLogic.Entry::name).toList());
-        assertEquals(5, QuickMenuLogic.entries(List.of()).size());
+        assertEquals(names, entries.stream().skip(1).map(QuickMenuLogic.Entry::name).toList());
+        assertTrue(entries.stream().skip(1).allMatch(e -> e.kind() == QuickMenuLogic.Kind.PRESET));
+        var empty = QuickMenuLogic.entries(List.of());
+        assertEquals(List.of(QuickMenuLogic.Kind.OFF, QuickMenuLogic.Kind.HINT), empty.stream().map(QuickMenuLogic.Entry::kind).toList());
+        assertEquals(-1, QuickMenuLogic.activeIndex(empty, ShapeConfig.of(new ShapeParams.Cuboid(1, 1, 1)),
+                true, n -> { throw new AssertionError("The hint must not look up a favorite"); }));
     }
 
     @Test void firstSegmentOffersOnOnlyForAPausedStoredShape() {
@@ -254,11 +256,9 @@ class QuickMenuLogicTest {
         java.util.function.Function<String, java.util.Optional<ShapeConfig>> lookup = n -> java.util.Optional.of(shape);
         assertEquals(0, QuickMenuLogic.activeIndex(menu, null, true, lookup));
         assertEquals(0, QuickMenuLogic.activeIndex(menu, shape, false, lookup));
-        assertEquals(5, QuickMenuLogic.activeIndex(menu, shape.withRevision(42), true, lookup));
+        assertEquals(1, QuickMenuLogic.activeIndex(menu, shape.withRevision(42), true, lookup));
         assertEquals(-1, QuickMenuLogic.activeIndex(menu, shape.withTransform(new ShapeTransform(1, false)), true, lookup));
         assertEquals(-1, QuickMenuLogic.activeIndex(menu, shape, true, n -> java.util.Optional.empty()));
-        var builtIn = BuiltInShapes.ALL.get(1).config();
-        assertEquals(2, QuickMenuLogic.activeIndex(menu, builtIn, true, n -> java.util.Optional.of(builtIn)));
     }
 
     @Test void deletionNeedsTwoClicksOnTheSameFavoriteAndMovingAwayCancels() {
@@ -278,10 +278,15 @@ class QuickMenuLogicTest {
         assertFalse(state.rightClick(a));
         assertFalse(state.rightClick(b));
         assertTrue(state.rightClick(b));
-        for (var entry : QuickMenuLogic.entries(List.of()).subList(0, 5)) {
+        for (var entry : QuickMenuLogic.entries(List.of())) {
             assertFalse(state.rightClick(entry));
             assertFalse(state.rightClick(entry));
             assertNull(state.pending());
+        }
+        for (String name : List.of("Tunnel 1×2", "Tunnel 3×3", "Floor 5×5", "Stairs")) {
+            var entry = QuickMenuLogic.entries(List.of(name)).get(1);
+            assertFalse(state.rightClick(entry));
+            assertTrue(state.rightClick(entry));
         }
     }
 }

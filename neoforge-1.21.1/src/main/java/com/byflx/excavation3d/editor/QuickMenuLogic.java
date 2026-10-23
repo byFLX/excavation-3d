@@ -128,8 +128,8 @@ public final class QuickMenuLogic {
         if (shape == null || !enabled) return 0;
         for (int i = 1; i < entries.size(); i++) {
             Entry entry = entries.get(i);
-            Optional<ShapeConfig> config = entry.kind() == Kind.BUILT_IN
-                    ? BuiltInShapes.find(entry.name()).map(BuiltInShapes.Entry::config) : favorites.apply(entry.name());
+            if (entry.kind() != Kind.PRESET) continue;
+            Optional<ShapeConfig> config = favorites.apply(entry.name());
             if (config.map(c -> c.withRevision(0).equals(shape.withRevision(0))).orElse(false)) return i;
         }
         return -1;
@@ -155,14 +155,14 @@ public final class QuickMenuLogic {
         return fitText(width.applyAsInt(full) <= maxWidth ? full : compact, maxWidth, width);
     }
 
-    public enum Kind { OFF, BUILT_IN, PRESET }
+    public enum Kind { OFF, PRESET, HINT }
     public record Entry(Kind kind, String name) { }
 
     public static List<Entry> entries(List<String> favorites) {
         List<Entry> result = new ArrayList<>();
         result.add(new Entry(Kind.OFF, ""));
-        BuiltInShapes.ALL.forEach(e -> result.add(new Entry(Kind.BUILT_IN, e.id())));
         favorites.forEach(name -> result.add(new Entry(Kind.PRESET, name)));
+        if (favorites.isEmpty()) result.add(new Entry(Kind.HINT, ""));
         return List.copyOf(result);
     }
 

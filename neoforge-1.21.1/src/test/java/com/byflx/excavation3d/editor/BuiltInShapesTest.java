@@ -8,13 +8,14 @@ import static org.junit.jupiter.api.Assertions.*;
 class BuiltInShapesTest {
     @Test void definitionsHaveFixedOrderDimensionsAndDefaultStairs() {
         assertEquals(4, BuiltInShapes.ALL.size());
+        assertEquals(java.util.List.of("Tunnel 1×2", "Tunnel 3×3", "Floor 5×5", "Stairs"),
+                BuiltInShapes.ALL.stream().map(BuiltInShapes.Entry::name).toList());
         assertEquals(new ShapeParams.Cuboid(1, 2, 1), BuiltInShapes.ALL.get(0).config().params());
         assertEquals(new ShapeParams.Cuboid(3, 3, 1), BuiltInShapes.ALL.get(1).config().params());
         assertEquals(new ShapeParams.Cuboid(5, 5, 1), BuiltInShapes.ALL.get(2).config().params());
         assertEquals(ShapeTemplates.defaults(ShapeType.STAIR), BuiltInShapes.ALL.get(3).config().params());
         for (var entry : BuiltInShapes.ALL) {
             assertInstanceOf(ShapeGenerator.Valid.class, ShapeGenerator.generate(entry.config(), ShapeLimits.DEFAULT));
-            assertEquals(entry, BuiltInShapes.find(entry.id()).orElseThrow());
         }
     }
 

@@ -36,6 +36,7 @@ public final class PresetRepository {
 
     private final Path file;
     private final Map<String, ShapeConfig> presets = new LinkedHashMap<>();
+    private boolean defaultsSeeded;
 
     private PresetRepository(Path file) {
         this.file = file;
@@ -57,16 +58,11 @@ public final class PresetRepository {
     }
 
     public List<String> selectionNames() {
-        List<String> names = new ArrayList<>();
-        BuiltInShapes.ALL.forEach(e -> names.add(e.id()));
-        // Internal shortcut tokens avoid any collision with a built-in ID used as a favorite name.
-        names().forEach(name -> names.add("@favorite/" + name));
-        return List.copyOf(names);
+        return names();
     }
 
-    public Optional<ShapeConfig> selection(String token) {
-        return token.startsWith("@favorite/") ? find(token.substring(10))
-                : BuiltInShapes.find(token).map(BuiltInShapes.Entry::config);
+    public Optional<ShapeConfig> selection(String name) {
+        return find(name);
     }
 
     public List<String> names() {
@@ -106,6 +102,8 @@ public final class PresetRepository {
 
     private void read() {
         if (!Files.isRegularFile(file)) {
+            seedDefaults();
+            write();
             return;
         }
         try {
@@ -115,6 +113,9 @@ public final class PresetRepository {
                 return;
             }
             JsonObject object = root.getAsJsonObject();
+            JsonElement seeded = object.get("defaultsSeeded");
+            defaultsSeeded = seeded != null && seeded.isJsonPrimitive()
+                    && seeded.getAsJsonPrimitive().isBoolean() && seeded.getAsBoolean();
             JsonObject stored = object.getAsJsonObject("presets");
             List<String> order = new ArrayList<>();
             boolean migrate = !object.has("order") || !object.get("order").isJsonArray();
@@ -130,16 +131,31 @@ public final class PresetRepository {
             for (String storedName : order) {
                 Map.Entry<String, JsonElement> entry = Map.entry(storedName, stored.get(storedName));
                 String name = entry.getKey().trim();
-                if (name.isEmpty() || name.length() > MAX_NAME_LENGTH || presets.size() >= MAX_PRESETS) {
+                // Migration may add four seeds to an already-full file; never truncate saved favorites.
+                if (name.isEmpty() || name.length() > MAX_NAME_LENGTH) {
                     continue;
                 }
                 ShapeCodecs.CONFIG_CODEC.parse(JsonOps.INSTANCE, entry.getValue()).result()
                         .ifPresent(config -> presets.put(name, config));
             }
+            if (!defaultsSeeded) {
+                seedDefaults();
+                migrate = true;
+            }
             if (migrate) write();
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("Could not read shape presets from {}", file, e);
         }
+    }
+
+    private void seedDefaults() {
+        Map<String, ShapeConfig> existing = new LinkedHashMap<>(presets);
+        presets.clear();
+        for (BuiltInShapes.Entry seed : BuiltInShapes.ALL) {
+            if (!existing.containsKey(seed.name())) presets.put(seed.name(), seed.config());
+        }
+        presets.putAll(existing);
+        defaultsSeeded = true;
     }
 
     private boolean write() {
@@ -149,6 +165,7 @@ public final class PresetRepository {
                     .ifPresent(json -> entries.add(entry.getKey(), json));
         }
         JsonObject root = new JsonObject();
+        root.addProperty("defaultsSeeded", defaultsSeeded);
         root.add("presets", entries);
         JsonArray order = new JsonArray();
         presets.keySet().forEach(order::add);

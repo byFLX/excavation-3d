@@ -6,7 +6,6 @@ import com.byflx.excavation3d.client.QuickShapeAction;
 import com.byflx.excavation3d.client.Excavation3DClient;
 import com.byflx.excavation3d.data.ToolShapeData;
 import com.byflx.excavation3d.editor.QuickMenuLogic;
-import com.byflx.excavation3d.editor.BuiltInShapes;
 import com.byflx.excavation3d.registry.ModComponents;
 import com.byflx.excavation3d.shape.ShapeConfig;
 import com.byflx.excavation3d.shape.ShapeGenerator;
@@ -65,15 +64,16 @@ public final class QuickShapeScreen extends Screen {
         var menu = QuickMenuLogic.entries(PresetRepository.get().names());
         int activeIndex = QuickMenuLogic.activeIndex(menu, active, shapeEnabled, PresetRepository.get()::find);
         entries = menu.stream().map(entry -> {
+            if (entry.kind() == QuickMenuLogic.Kind.HINT) return emptyHint();
             ShapeConfig config = switch (entry.kind()) {
                 case OFF -> firstOn ? active : null;
-                case BUILT_IN -> BuiltInShapes.find(entry.name()).orElseThrow().config();
                 case PRESET -> PresetRepository.get().find(entry.name()).orElse(null);
+                case HINT -> null;
             };
             Component name = switch (entry.kind()) {
-                case BUILT_IN -> Component.translatable(BuiltInShapes.find(entry.name()).orElseThrow().translationKey());
                 case OFF -> Component.translatable(firstOn ? "gui.excavation3d.quick.on" : "gui.excavation3d.quick.off");
                 case PRESET -> Component.literal(entry.name());
+                case HINT -> Component.empty();
             };
             boolean enabled = entry.kind() == QuickMenuLogic.Kind.OFF;
             Component details = switch (entry.kind()) {
@@ -91,6 +91,12 @@ public final class QuickShapeScreen extends Screen {
                     activeIndex >= 0 && menu.get(activeIndex).equals(entry), enabled);
         }).collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
         hover = new double[entries.size()];
+    }
+
+    private static WheelEntry emptyHint() {
+        return new WheelEntry(new QuickMenuLogic.Entry(QuickMenuLogic.Kind.HINT, ""), null,
+                Component.translatable("gui.excavation3d.quick.empty", Excavation3DClient.editorKeyLabel()),
+                Component.empty(), null, false, false);
     }
 
     @Override protected void init() {
@@ -135,9 +141,7 @@ public final class QuickShapeScreen extends Screen {
         if (selection.entry().kind() == QuickMenuLogic.Kind.OFF) {
             QuickShapeAction.start(null);
         } else {
-            QuickShapeAction.startPreset(selection.config(),
-                    selection.entry().kind() == QuickMenuLogic.Kind.PRESET
-                            ? "@favorite/" + selection.entry().name() : selection.entry().name());
+            QuickShapeAction.startPreset(selection.config(), selection.entry().name());
         }
     }
 
@@ -152,6 +156,7 @@ public final class QuickShapeScreen extends Screen {
             QuickMenuLogic.Entry entry = index < 0 ? null : entries.get(index).entry();
             if (deletion.rightClick(entry) && PresetRepository.get().delete(entry.name())) {
                 entries.remove(index);
+                if (entries.size() == 1) entries.add(emptyHint());
                 page = layout().page();
                 boolean marked = activeConfig == null || !shapeEnabled;
                 for (int i = 0; i < entries.size(); i++) {
@@ -244,7 +249,8 @@ public final class QuickShapeScreen extends Screen {
                     if (firstOn) ShapeTypeIcons.draw(g, entry.config().type(), -5, -5, 2, color);
                     else ShapeTypeIcons.drawOff(g, -7, -7, 2, color);
                 }
-                case BUILT_IN, PRESET -> ShapeTypeIcons.draw(g, entry.config() == null ? null : entry.config().type(), -5, -5, 2, color);
+                case PRESET -> ShapeTypeIcons.draw(g, entry.config() == null ? null : entry.config().type(), -5, -5, 2, color);
+                case HINT -> { }
             }
             g.pose().popPose();
             line(g, entry.name(), l.labelX(segment), l.labelY(segment) + 8 * l.scale(),
@@ -274,8 +280,10 @@ public final class QuickShapeScreen extends Screen {
                     30 * s, 0.55 * s, alpha(MUTED, fade));
             return;
         }
-        if (deletion.pending() != null) {
-            var lines = font.split(Component.translatable("gui.excavation3d.quick.delete_confirm", deletion.pending()), 70);
+        if (deletion.pending() != null || hovered.entry().kind() == QuickMenuLogic.Kind.HINT) {
+            Component message = deletion.pending() == null ? hovered.name()
+                    : Component.translatable("gui.excavation3d.quick.delete_confirm", deletion.pending());
+            var lines = font.split(message, 70);
             g.pose().pushPose();
             g.pose().translate(cx, cy - lines.size() * 3 * s, 0);
             g.pose().scale((float) (0.6 * s), (float) (0.6 * s), 1);
@@ -308,8 +316,7 @@ public final class QuickShapeScreen extends Screen {
             }
             g.flush();
         }
-        Component detail = hovered.entry().kind() == QuickMenuLogic.Kind.BUILT_IN && rightClicked
-                ? Component.translatable("gui.excavation3d.quick.built_in") : hovered.details();
+        Component detail = hovered.details();
         double detailScale = hovered.thumbnail() == null ? 0.65 * s
                 : Math.min(0.65 * s, 32 * s / Math.max(1, font.width(detail)));
         line(g, detail, cx, cy + 14 * s, 32 * s, detailScale, alpha(MUTED, fade));
