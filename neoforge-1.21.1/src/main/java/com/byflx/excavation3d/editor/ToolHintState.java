@@ -51,6 +51,7 @@ public final class ToolHintState {
 
     /** Above vanilla's dynamic health/armor, item name and action bar, with a readable gap. */
     public static int bottom(int height, int leftHeight, int rightHeight) {
-        return height - Math.max(86, Math.max(leftHeight, rightHeight) + 30);
+        // Directly above the hearts/food rows (vanilla's left/right stack heights), below item names and the action bar.
+        return height - Math.max(39, Math.max(leftHeight, rightHeight)) - 2;
     }
 }

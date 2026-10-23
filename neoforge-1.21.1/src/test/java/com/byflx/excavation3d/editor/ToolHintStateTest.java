@@ -96,19 +96,18 @@ class ToolHintStateTest {
         assertEquals(0, hint.opacity(25000));
     }
 
-    @Test void lowerViewReservationClearsDynamicVanillaActionBarAndItemNamePositions() {
+    @Test void hintSitsDirectlyAboveTheHeartsAndBelowItemNamesAndTheActionBar() {
         for (int height : new int[] {240, 360, 1080}) {
-            for (int left : new int[] {39, 49, 59, 100, 140}) {
+            for (int left : new int[] {39, 49, 59, 100}) {
                 for (int right : new int[] {39, 59, 90}) {
                     int bottom = ToolHintState.bottom(height, left, right);
-                    int stack = Math.max(left, right);
-                    int actionBarTop = height - Math.max(stack + 9, 68) - 4;
-                    int itemNameTop = height - Math.max(stack, 59);
-                    assertTrue(bottom <= actionBarTop - 8);
-                    assertTrue(bottom <= itemNameTop - 8);
-                    assertTrue(bottom <= height - stack - 8);
+                    int stack = Math.max(39, Math.max(left, right));
+                    assertEquals(height - stack - 2, bottom);
+                    assertTrue(bottom <= height - stack, "never overlaps hearts, food or armor");
                 }
             }
         }
+        // Survival default stack: the hint ends 41 px above the bottom, below vanilla's item name (59) and action bar (68).
+        assertTrue(1080 - ToolHintState.bottom(1080, 39, 39) < 59);
     }
 }

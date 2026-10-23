@@ -57,7 +57,7 @@ public final class ToolHud {
         List<FormattedCharSequence> lines = mc.font.split(line, (int) ((g.guiWidth() - 16) / SCALE));
         float textHeight = lines.size() * mc.font.lineHeight * SCALE;
         float y = ToolHintState.bottom(g.guiHeight(), mc.gui.leftHeight, mc.gui.rightHeight) - textHeight;
-        if (y < g.guiHeight() / 2F + 8) return; // No free lower-centre space at this size / health stack.
+        if (y < g.guiHeight() / 2F) return; // Tiny windows: no free lower-centre space.
         g.pose().pushPose();
         g.pose().translate(g.guiWidth() / 2F, y, 0);
         g.pose().scale(SCALE, SCALE, 1);
