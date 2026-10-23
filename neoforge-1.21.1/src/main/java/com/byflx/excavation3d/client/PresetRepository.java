@@ -15,15 +15,15 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.TreeMap;
+import java.util.LinkedHashMap;
+import com.google.gson.JsonArray;
+import com.byflx.excavation3d.editor.BuiltInShapes;
+import com.byflx.excavation3d.editor.PresetShortcuts;
+import java.util.ArrayList;
 import net.neoforged.fml.loading.FMLPaths;
 import org.slf4j.Logger;
 
-/**
- * Personal named presets, stored on the client in {@code config/excavation3d-presets.json}
- * (plan §9). Loading one in the editor creates a draft; the quick menu sends it through the same
- * validated server Apply session. Tools never depend on this file. Broken entries are skipped.
- */
+/** Personal favorites in persistent save order. Legacy files migrate once; tools remain independent. */
 public final class PresetRepository {
     public static final int MAX_PRESETS = 64;
     public static final int MAX_NAME_LENGTH = 32;
@@ -35,7 +35,7 @@ public final class PresetRepository {
     }
 
     private final Path file;
-    private final Map<String, ShapeConfig> presets = new TreeMap<>();
+    private final Map<String, ShapeConfig> presets = new LinkedHashMap<>();
 
     private PresetRepository(Path file) {
         this.file = file;
@@ -47,6 +47,26 @@ public final class PresetRepository {
             instance.read();
         }
         return instance;
+    }
+
+    /** Also used by pure persistence tests without touching the game config directory. */
+    public static PresetRepository load(Path file) {
+        PresetRepository repository = new PresetRepository(file);
+        repository.read();
+        return repository;
+    }
+
+    public List<String> selectionNames() {
+        List<String> names = new ArrayList<>();
+        BuiltInShapes.ALL.forEach(e -> names.add(e.id()));
+        // Internal shortcut tokens avoid any collision with a built-in ID used as a favorite name.
+        names().forEach(name -> names.add("@favorite/" + name));
+        return List.copyOf(names);
+    }
+
+    public Optional<ShapeConfig> selection(String token) {
+        return token.startsWith("@favorite/") ? find(token.substring(10))
+                : BuiltInShapes.find(token).map(BuiltInShapes.Entry::config);
     }
 
     public List<String> names() {
@@ -65,15 +85,23 @@ public final class PresetRepository {
         if (!presets.containsKey(name) && presets.size() >= MAX_PRESETS) {
             return SaveResult.FULL;
         }
+        Map<String, ShapeConfig> before = new LinkedHashMap<>(presets);
         presets.put(name, config.withRevision(0L));
-        return write() ? SaveResult.SAVED : SaveResult.IO_ERROR;
+        if (write()) return SaveResult.SAVED;
+        presets.clear();
+        presets.putAll(before);
+        return SaveResult.IO_ERROR;
     }
 
     public boolean delete(String name) {
+        Map<String, ShapeConfig> before = new LinkedHashMap<>(presets);
         if (presets.remove(name.trim()) == null) {
             return false;
         }
-        return write();
+        if (write()) return true;
+        presets.clear();
+        presets.putAll(before);
+        return false;
     }
 
     private void read() {
@@ -86,7 +114,21 @@ public final class PresetRepository {
                     || !root.getAsJsonObject().get("presets").isJsonObject()) {
                 return;
             }
-            for (Map.Entry<String, JsonElement> entry : root.getAsJsonObject().getAsJsonObject("presets").entrySet()) {
+            JsonObject object = root.getAsJsonObject();
+            JsonObject stored = object.getAsJsonObject("presets");
+            List<String> order = new ArrayList<>();
+            boolean migrate = !object.has("order") || !object.get("order").isJsonArray();
+            if (!migrate) {
+                for (JsonElement name : object.getAsJsonArray("order")) {
+                    if (name.isJsonPrimitive() && name.getAsJsonPrimitive().isString()
+                            && stored.has(name.getAsString()) && !order.contains(name.getAsString())) order.add(name.getAsString());
+                }
+            }
+            for (String name : PresetShortcuts.sorted(List.copyOf(stored.keySet()))) {
+                if (!order.contains(name)) order.add(name);
+            }
+            for (String storedName : order) {
+                Map.Entry<String, JsonElement> entry = Map.entry(storedName, stored.get(storedName));
                 String name = entry.getKey().trim();
                 if (name.isEmpty() || name.length() > MAX_NAME_LENGTH || presets.size() >= MAX_PRESETS) {
                     continue;
@@ -94,6 +136,7 @@ public final class PresetRepository {
                 ShapeCodecs.CONFIG_CODEC.parse(JsonOps.INSTANCE, entry.getValue()).result()
                         .ifPresent(config -> presets.put(name, config));
             }
+            if (migrate) write();
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("Could not read shape presets from {}", file, e);
         }
@@ -107,6 +150,9 @@ public final class PresetRepository {
         }
         JsonObject root = new JsonObject();
         root.add("presets", entries);
+        JsonArray order = new JsonArray();
+        presets.keySet().forEach(order::add);
+        root.add("order", order);
         try {
             Files.createDirectories(file.getParent());
             Files.writeString(file, new GsonBuilder().setPrettyPrinting().create().toJson(root), StandardCharsets.UTF_8);

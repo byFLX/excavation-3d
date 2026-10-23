@@ -17,19 +17,26 @@ import net.minecraft.network.codec.StreamCodec;
  * @param toolId       identifies this tool, so an editor session cannot write to a swapped tool
  * @param revision     incremented by the server on every accepted change; 0 means never configured
  * @param config       the active shape; empty if never configured or if the stored data was broken
- * @param worldPreview whether the world preview is shown while holding the tool
+ * @param worldPreview legacy value, read but ignored and omitted from new saves
+ * @param enabled      whether excavation is active on this tool
  */
-public record ToolShapeData(UUID toolId, long revision, Optional<ShapeConfig> config, boolean worldPreview) {
+public record ToolShapeData(UUID toolId, long revision, Optional<ShapeConfig> config, boolean worldPreview, boolean enabled) {
     /** A shape that fails to decode is dropped (not the whole item), which {@link #isDamaged()} reports. */
     public static final Codec<ToolShapeData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             UUIDUtil.CODEC.fieldOf("tool_id").forGetter(ToolShapeData::toolId),
             Codec.LONG.fieldOf("revision").forGetter(ToolShapeData::revision),
             ShapeCodecs.CONFIG_CODEC.lenientOptionalFieldOf("shape").forGetter(ToolShapeData::config),
-            Codec.BOOL.optionalFieldOf("world_preview", false).forGetter(ToolShapeData::worldPreview)
+            Codec.BOOL.optionalFieldOf("world_preview", false).forGetter(data -> false),
+            Codec.BOOL.optionalFieldOf("enabled", true).forGetter(ToolShapeData::enabled)
     ).apply(instance, ToolShapeData::new));
 
     public static final StreamCodec<FriendlyByteBuf, ToolShapeData> STREAM_CODEC =
             StreamCodec.ofMember(ToolShapeData::write, ToolShapeData::read);
+
+    /** Legacy constructor: the preview value is read for compatibility only. */
+    public ToolShapeData(UUID toolId, long revision, Optional<ShapeConfig> config, boolean worldPreview) {
+        this(toolId, revision, config, worldPreview, true);
+    }
 
     public ToolShapeData {
         Objects.requireNonNull(toolId, "toolId");
@@ -49,14 +56,18 @@ public record ToolShapeData(UUID toolId, long revision, Optional<ShapeConfig> co
         return revision > 0 && config.isEmpty();
     }
 
-    public ToolShapeData withConfig(ShapeConfig newConfig, long newRevision, boolean newWorldPreview) {
-        return new ToolShapeData(toolId, newRevision, Optional.of(newConfig), newWorldPreview);
+    public ToolShapeData withConfig(ShapeConfig newConfig, long newRevision) {
+        return new ToolShapeData(toolId, newRevision, Optional.of(newConfig), false, true);
+    }
+
+    public ToolShapeData withEnabled(boolean value, long newRevision) {
+        return new ToolShapeData(toolId, newRevision, config, false, value);
     }
 
     private void write(FriendlyByteBuf buf) {
         buf.writeUUID(toolId);
         buf.writeVarLong(revision);
-        buf.writeBoolean(worldPreview);
+        buf.writeBoolean(enabled);
         buf.writeBoolean(config.isPresent());
         config.ifPresent(c -> ShapeCodecs.writeConfig(buf, c));
     }
@@ -64,10 +75,10 @@ public record ToolShapeData(UUID toolId, long revision, Optional<ShapeConfig> co
     private static ToolShapeData read(FriendlyByteBuf buf) {
         UUID toolId = buf.readUUID();
         long revision = buf.readVarLong();
-        boolean worldPreview = buf.readBoolean();
+        boolean enabled = buf.readBoolean();
         Optional<ShapeConfig> config = buf.readBoolean()
                 ? Optional.of(ShapeCodecs.readConfig(buf, revision))
                 : Optional.empty();
-        return new ToolShapeData(toolId, revision, config, worldPreview);
+        return new ToolShapeData(toolId, revision, config, false, enabled);
     }
 }

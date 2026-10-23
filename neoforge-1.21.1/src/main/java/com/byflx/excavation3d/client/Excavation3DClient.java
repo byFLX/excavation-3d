@@ -42,7 +42,9 @@ public final class Excavation3DClient {
     private static final QuickMenuLogic.Hold editorHold = new QuickMenuLogic.Hold();
     private static boolean suppressEditor;
 
-    public Excavation3DClient(IEventBus modBus) {
+    public Excavation3DClient(IEventBus modBus, net.neoforged.fml.ModContainer container) {
+        container.registerConfig(net.neoforged.fml.config.ModConfig.Type.CLIENT,
+                com.byflx.excavation3d.config.ClientConfig.SPEC, "excavation3d-client.toml");
         modBus.addListener(Excavation3DClient::registerKeys);
         NeoForge.EVENT_BUS.addListener(Excavation3DClient::onClientTick);
         NeoForge.EVENT_BUS.addListener(Excavation3DClient::onInteractionKey);
@@ -109,21 +111,15 @@ public final class Excavation3DClient {
         ToolShapeData data = ModTags.shapeOf(mc.player.getMainHandItem());
         ShapeConfig active = data == null ? null : data.config().orElse(null);
         if (selected == 0) {
-            var last = ClientState.lastShape(mc.player.getUUID());
-            switch (PresetShortcuts.toggle(active != null, last.isPresent())) {
-                case OFF -> QuickShapeAction.start(null, false);
-                case RESTORE -> QuickShapeAction.start(last.orElseThrow().config(), last.orElseThrow().worldPreview());
-                case NONE -> { }
-            }
+            QuickShapeAction.start(null);
             return;
         }
         PresetRepository presets = PresetRepository.get();
         var name = selected <= 2
-                ? PresetShortcuts.cycle(presets.names(), presets::find, active, selected == 1 ? 1 : -1,
+                ? PresetShortcuts.cycle(presets.selectionNames(), presets::selection, data != null && data.enabled() ? active : null, selected == 1 ? 1 : -1,
                         QuickShapeAction.confirmedPresetName())
-                : PresetShortcuts.nth(presets.names(), selected - 2);
-        name.ifPresent(n -> presets.find(n).ifPresent(config -> QuickShapeAction.startPreset(config,
-                data != null && data.worldPreview(), n)));
+                : PresetShortcuts.nth(presets.selectionNames(), selected - 2);
+        name.ifPresent(n -> presets.selection(n).ifPresent(config -> QuickShapeAction.startPreset(config, n)));
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {

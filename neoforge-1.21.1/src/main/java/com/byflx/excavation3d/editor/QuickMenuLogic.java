@@ -2,15 +2,11 @@ package com.byflx.excavation3d.editor;
 
 import com.byflx.excavation3d.shape.ShapeConfig;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.function.ToIntFunction;
 
-/** Pure timing, radial selection, text fitting and per-player last-shape memory. */
+/** Pure timing, radial selection, text fitting and favorite deletion state. */
 public final class QuickMenuLogic {
     /** Adjust this constant to change the tap/hold boundary. */
     public static final long HOLD_MS = 250L;
@@ -44,8 +40,10 @@ public final class QuickMenuLogic {
 
     /** Segment zero points up, with the other segments following clockwise. */
     public record Layout(double centerX, double centerY, double radius, double deadZone, int count, int page) {
-        public int pages() { return Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE); }
-        public int offset() { return page * PAGE_SIZE; }
+        public int pages() { return Math.max(1, (count - 1 + PAGE_SIZE - 2) / (PAGE_SIZE - 1)); }
+        public int offset() { return page * (PAGE_SIZE - 1); }
+        /** Off/On is pinned to the top on every page. */
+        public int index(int segment) { return segment == 0 ? 0 : offset() + segment; }
         public int segments() { return Math.max(0, Math.min(PAGE_SIZE, count - offset())); }
         public double angle(int segment) { return -Math.PI / 2 + segment * Math.PI * 2 / segments(); }
         public double labelRadius() { return deadZone + (radius - deadZone) * 0.5; }
@@ -84,20 +82,20 @@ public final class QuickMenuLogic {
         public boolean showInstructions() { return scale() >= 0.8 && instructionsY() >= 6; }
         /** One-based visible number keys; unused keys on the final page do nothing. */
         public int numberSelection(int number) {
-            return number >= 1 && number <= segments() ? offset() + number - 1 : -1;
+            return number >= 1 && number <= segments() ? index(number - 1) : -1;
         }
         public int highlighted(double mouseX, double mouseY) {
             double dx = mouseX - centerX, dy = mouseY - centerY;
             if (!Double.isFinite(dx) || !Double.isFinite(dy)
                     || Math.hypot(dx, dy) <= deadZone || segments() == 0) return -1;
             // Beyond the ring still selects by angle, like a weapon wheel.
-            return offset() + segmentAtAngle(Math.atan2(dy, dx), segments());
+            return index(segmentAtAngle(Math.atan2(dy, dx), segments()));
         }
     }
 
     public static Layout layout(int screenWidth, int screenHeight, int count, int requestedPage) {
         count = Math.max(0, count);
-        int pages = Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
+        int pages = Math.max(1, (count - 1 + PAGE_SIZE - 2) / (PAGE_SIZE - 1));
         // Reserve the local vignette, hover expansion, hint and page counter. Never move the crosshair anchor.
         double scale = Math.max(0.01, Math.min(1,
                 Math.min((screenWidth / 2.0 - 4) / 102, (screenHeight / 2.0 - 4) / 116)));
@@ -121,20 +119,18 @@ public final class QuickMenuLogic {
         return Math.min(count - 1, (int) (shifted / turn * count));
     }
 
-    /** Tool and preset revisions differ; only the shape's configuration determines the marker. */
-    public static boolean isActive(Entry entry, ShapeConfig activeShape, ShapeConfig entryShape) {
-        return entry.kind() == Kind.OFF ? activeShape == null
-                : entry.kind() == Kind.PRESET && activeShape != null && entryShape != null
-                        && activeShape.withRevision(0).equals(entryShape.withRevision(0));
-    }
+    /** Paused and unconfigured tools mark Off, even though the paused action is labelled On. */
+    public static boolean firstSegmentOn(boolean hasShape, boolean enabled) { return hasShape && !enabled; }
 
-    /** Exactly one marker, using the entries' alphabetical order even for duplicate configs. */
-    public static int activeIndex(List<Entry> entries, ShapeConfig activeShape,
-            java.util.function.Function<String, Optional<ShapeConfig>> lookup) {
-        for (int i = 0; i < entries.size(); i++) {
+    /** Exactly one marker, at the first matching configuration in wheel order. */
+    public static int activeIndex(List<Entry> entries, ShapeConfig shape, boolean enabled,
+            java.util.function.Function<String, Optional<ShapeConfig>> favorites) {
+        if (shape == null || !enabled) return 0;
+        for (int i = 1; i < entries.size(); i++) {
             Entry entry = entries.get(i);
-            ShapeConfig config = entry.kind() == Kind.PRESET ? lookup.apply(entry.name()).orElse(null) : null;
-            if (isActive(entry, activeShape, config)) return i;
+            Optional<ShapeConfig> config = entry.kind() == Kind.BUILT_IN
+                    ? BuiltInShapes.find(entry.name()).map(BuiltInShapes.Entry::config) : favorites.apply(entry.name());
+            if (config.map(c -> c.withRevision(0).equals(shape.withRevision(0))).orElse(false)) return i;
         }
         return -1;
     }
@@ -159,44 +155,30 @@ public final class QuickMenuLogic {
         return fitText(width.applyAsInt(full) <= maxWidth ? full : compact, maxWidth, width);
     }
 
-    public enum Kind { OFF, LAST, PRESET, EMPTY }
+    public enum Kind { OFF, BUILT_IN, PRESET }
     public record Entry(Kind kind, String name) { }
 
-    public static List<Entry> entries(List<String> presets, boolean hasLast) {
-        return entries(presets, hasLast, false);
-    }
-
-    public static List<Entry> entries(List<String> presets, boolean hasLast, boolean hasShape) {
+    public static List<Entry> entries(List<String> favorites) {
         List<Entry> result = new ArrayList<>();
         result.add(new Entry(Kind.OFF, ""));
-        if (hasLast && !hasShape) result.add(new Entry(Kind.LAST, ""));
-        PresetShortcuts.sorted(presets).stream()
-                .forEach(name -> result.add(new Entry(Kind.PRESET, name)));
-        if (presets.isEmpty()) result.add(new Entry(Kind.EMPTY, ""));
+        BuiltInShapes.ALL.forEach(e -> result.add(new Entry(Kind.BUILT_IN, e.id())));
+        favorites.forEach(name -> result.add(new Entry(Kind.PRESET, name)));
         return List.copyOf(result);
     }
 
-    public static final class LastShape<T> {
-        private record Removal<T>(UUID player, T shape) { }
-        private final Map<UUID, T> shapes = new HashMap<>();
-        private final LinkedHashMap<Integer, Removal<T>> pending = new LinkedHashMap<>();
-        /** Caller records only a confirmed successful removal; Off on an empty tool keeps the last shape. */
-        public void remember(UUID player, T shape) { if (shape != null) shapes.put(player, shape); }
-        public Optional<T> find(UUID player) { return Optional.ofNullable(shapes.get(player)); }
-
-        /** Session-bound bookkeeping lives beyond the editor screen that sent Remove. */
-        public void expectRemoval(int sessionId, UUID player, T shape) {
-            if (shape == null) return;
-            pending.put(sessionId, new Removal<>(player, shape));
-            if (pending.size() > 64) pending.pollFirstEntry();
+    /** Moving to any other segment (including the dead zone) cancels a pending deletion. */
+    public static final class FavoriteDelete {
+        private String pending;
+        public String pending() { return pending; }
+        public void hover(Entry entry) {
+            if (entry == null || entry.kind() != Kind.PRESET || !entry.name().equals(pending)) pending = null;
         }
-
-        public void onResult(int sessionId, boolean accepted) {
-            Removal<T> removal = pending.remove(sessionId);
-            if (accepted && removal != null) remember(removal.player(), removal.shape());
+        public boolean rightClick(Entry entry) {
+            if (entry == null || entry.kind() != Kind.PRESET) { pending = null; return false; }
+            if (entry.name().equals(pending)) { pending = null; return true; }
+            pending = entry.name();
+            return false;
         }
-
-        public void clearPending() { pending.clear(); }
     }
 
     private QuickMenuLogic() { }

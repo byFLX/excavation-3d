@@ -1,6 +1,5 @@
 package com.byflx.excavation3d.client.screen;
 
-import com.byflx.excavation3d.preview.LabelPlacement;
 import com.byflx.excavation3d.preview.PreviewScale;
 import com.byflx.excavation3d.preview.ShapeDiff;
 import com.byflx.excavation3d.preview.CustomCanvas;
@@ -21,21 +20,17 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.RenderType;
-import net.minecraft.network.chat.Component;
 import org.joml.Matrix4f;
-import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
 
 /**
  * Renders the selected cells of a {@link GeneratedShape} as real cubes in the editor (plan §5):
  * selected cells are solid, so a plus looks like a plus and custom holes stay visible. Faces
- * between two selected cells are skipped. Adds a floor grid, labelled width/height/depth axes, the
- * anchor in gold and a caption explaining the front direction.
+ * between two selected cells are skipped. Adds a floor grid and the anchor in gold.
  *
  * <p>The block scale stays fixed while the shape changes ({@link PreviewScale}), so a size change
  * reads as one against the 1-block floor grid; added cells flash green and removed cells red for a
- * second. Custom mode also draws the canvas and current-layer ghosts. Dimension labels sit beyond their own axis ends and outside the projected shape bounds;
- * a label is hidden if there is no free space.
+ * second. Custom mode also draws the canvas and current-layer ghosts.
  *
  * <p>Local axes: x = width (right), y = height (up), z = depth (into the block, away from the
  * viewer in the front view). The mesh is cached per shape; camera changes only change the matrix.
@@ -48,15 +43,9 @@ public final class ShapePreviewRenderer {
     private static final int REMOVED = 0xFF2020;
     private static final int GRID = 0xFF3A3A3A;
     private static final int GRID_FOOTPRINT = 0xFF5A5A5A;
-    private static final int AXIS_WIDTH = 0xFFE05050;
-    private static final int AXIS_HEIGHT = 0xFF50D050;
-    private static final int AXIS_DEPTH = 0xFF5080FF;
-    private static final int FORWARD = 0xFFFFFFFF;
     /** Grid cells drawn beyond the footprint on every side. */
     private static final int GRID_EXTRA = 2;
     private static final long HIGHLIGHT_MS = 1000L;
-    /** Distance of the labels from the scene edges; the caller keeps captions and buttons outside the scene. */
-    private static final int LABEL_PADDING = 2;
     // Brightness per face: -x, +x, -y, +y, -z (front), +z (back).
     private static final float[] SHADE = {0.78F, 0.78F, 0.5F, 1.0F, 0.9F, 0.6F};
 
@@ -112,9 +101,6 @@ public final class ShapePreviewRenderer {
     public void render(GuiGraphics graphics, Font font, int x0, int y0, int x1, int y1, GeneratedShape shape,
             PreviewCamera camera, boolean resultView, boolean custom, int layer, double mouseX, double mouseY,
             boolean anchorMode) {
-        // Front gets a dedicated line, never part of a row of dimensions.
-        int frontY = y1 - font.lineHeight - 2;
-        y1 = frontY - 3;
         if (!shape.equals(cachedShape) || resultView != cachedResultView) {
             rebuild(shape, resultView);
             cachedShape = shape;
@@ -146,16 +132,6 @@ public final class ShapePreviewRenderer {
         Matrix4f matrix = new Matrix4f(pose.last().pose());
         ShapeDiff active = resultView ? ShapeDiff.NONE : activeHighlight(shape);
 
-        List<PendingLabel> pending = labels(font, matrix, shape);
-        List<LabelPlacement.AxisLabel> anchors = new ArrayList<>(pending.size());
-        for (PendingLabel label : pending) {
-            anchors.add(label.anchor());
-        }
-        LabelPlacement.Rect panel = new LabelPlacement.Rect(x0 + LABEL_PADDING, y0 + LABEL_PADDING,
-                x1 - LABEL_PADDING, y1 - LABEL_PADDING);
-        List<Optional<LabelPlacement.Rect>> layout = LabelPlacement.axisEnds(anchors,
-                projectedBounds(matrix, w, h, d, resultView), panel);
-
         VertexConsumer consumer = graphics.bufferSource().getBuffer(RenderType.gui());
         drawGrid(consumer, matrix, w, d);
         if (custom) {
@@ -171,7 +147,6 @@ public final class ShapePreviewRenderer {
         for (int q = 0; q < quads; q++) {
             quad(consumer, matrix, vertices, q * 12, colors[q]);
         }
-        drawAxes(consumer, matrix, w, h, d);
         if (!resultView) {
             drawHighlight(consumer, matrix, shape, active);
             if (custom) {
@@ -190,39 +165,8 @@ public final class ShapePreviewRenderer {
         }
         graphics.flush();
         pose.popPose();
-        // The labels must stay readable in front of the cubes.
         RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
-
-        for (int i = 0; i < pending.size(); i++) {
-            if (layout.get(i).isEmpty()) continue;
-            LabelPlacement.Rect at = layout.get(i).get();
-            graphics.drawString(font, pending.get(i).text(), at.x0(), at.y0(), pending.get(i).color(), true);
-        }
         graphics.disableScissor();
-        if (!resultView) {
-            graphics.enableScissor(x0, frontY, x1, frontY + font.lineHeight);
-            graphics.drawCenteredString(font, Component.translatable("gui.excavation3d.axis.front"),
-                    (x0 + x1) / 2, frontY, FORWARD);
-            graphics.disableScissor();
-        }
-    }
-
-    private record PendingLabel(Component text, int color, LabelPlacement.AxisLabel anchor) {
-    }
-
-    /** Labels use exactly the same endpoints as the rendered axes. */
-    private static List<PendingLabel> labels(Font font, Matrix4f matrix, GeneratedShape shape) {
-        int w = shape.width();
-        int h = shape.height();
-        int d = shape.depth();
-        List<PendingLabel> labels = new ArrayList<>(3);
-        labels.add(label(font, matrix, w + 0.6F, -0.05F, -0.05F, Component.translatable("gui.excavation3d.axis.width", w),
-                AXIS_WIDTH));
-        labels.add(label(font, matrix, -0.05F, h + 0.6F, -0.05F, Component.translatable("gui.excavation3d.axis.height", h),
-                AXIS_HEIGHT));
-        labels.add(label(font, matrix, -0.05F, -0.05F, d + 0.6F, Component.translatable("gui.excavation3d.axis.depth", d),
-                AXIS_DEPTH));
-        return labels;
     }
 
     private void rebuild(GeneratedShape shape, boolean resultView) {
@@ -298,7 +242,6 @@ public final class ShapePreviewRenderer {
         return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
-    /** The size-change diff still shown on {@code shape}, or {@link ShapeDiff#NONE} once it faded out. */
     private ShapeDiff activeHighlight(GeneratedShape shape) {
         if (highlight.isEmpty() || !shape.equals(highlightShape)) {
             return ShapeDiff.NONE;
@@ -393,13 +336,6 @@ public final class ShapePreviewRenderer {
         }
     }
 
-    private static void drawAxes(VertexConsumer consumer, Matrix4f matrix, int w, int h, int d) {
-        float o = -0.05F;
-        bar(consumer, matrix, o, o, o, w + 0.6F, o, o, 0.05F, AXIS_WIDTH);
-        bar(consumer, matrix, o, o, o, o, h + 0.6F, o, 0.05F, AXIS_HEIGHT);
-        bar(consumer, matrix, o, o, o, o, o, d + 0.6F, 0.05F, AXIS_DEPTH);
-    }
-
     /** An axis-aligned thin bar from a to b, drawn as two crossing quads so it shows from any angle. */
     private static void bar(VertexConsumer consumer, Matrix4f matrix, float ax, float ay, float az, float bx,
             float by, float bz, float t, int argb) {
@@ -435,27 +371,4 @@ public final class ShapePreviewRenderer {
         }
     }
 
-    private static LabelPlacement.Rect projectedBounds(Matrix4f matrix, int w, int h, int d, boolean result) {
-        float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
-        float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
-        for (int x : new int[] {0, w}) for (int y : new int[] {result ? -1 : 0, h}) {
-            for (int z : new int[] {0, d}) {
-                Vector3f p = matrix.transformPosition(x, y, z, new Vector3f());
-                minX = Math.min(minX, p.x()); minY = Math.min(minY, p.y());
-                maxX = Math.max(maxX, p.x()); maxY = Math.max(maxY, p.y());
-            }
-        }
-        return new LabelPlacement.Rect((int) Math.floor(minX) - 3, (int) Math.floor(minY) - 3,
-                (int) Math.ceil(maxX) + 3, (int) Math.ceil(maxY) + 3);
-    }
-
-    private static PendingLabel label(Font font, Matrix4f matrix, float x, float y, float z,
-            Component text, int color) {
-        Vector3f screen = matrix.transformPosition(x, y, z, new Vector3f());
-        Vector3f origin = matrix.transformPosition(-0.05F, -0.05F, -0.05F, new Vector3f());
-        var label = new LabelPlacement.Label(Math.round(screen.x()), Math.round(screen.y()),
-                font.width(text) + 1, font.lineHeight + 1);
-        return new PendingLabel(text, color, new LabelPlacement.AxisLabel(label,
-                Math.round(origin.x()), Math.round(origin.y())));
-    }
 }

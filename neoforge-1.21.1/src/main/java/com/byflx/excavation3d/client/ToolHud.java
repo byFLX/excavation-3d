@@ -19,7 +19,7 @@ public final class ToolHud {
     private static final float SCALE = 0.85F;
     private static ToolHintState state = new ToolHintState();
     private record HeldTool(int slot, Object item) { }
-    private record ShapeState(Object config, boolean worldPreview) { }
+    private record ShapeState(Object config, boolean enabled) { }
 
     private ToolHud() { }
 
@@ -31,7 +31,7 @@ public final class ToolHud {
         boolean eligible = mc.player != null && mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS);
         ToolShapeData data = eligible ? ModTags.shapeOf(mc.player.getMainHandItem()) : null;
         Object tool = eligible ? new HeldTool(mc.player.getInventory().selected, mc.player.getMainHandItem().getItem()) : null;
-        Object shape = data == null ? null : new ShapeState(data.config().orElse(null), data.worldPreview());
+        Object shape = data == null ? null : new ShapeState(data.config().orElse(null), data.enabled());
         state.update(Util.getMillis(), eligible, tool, shape, ClientState.bypassActive(), Screen.hasShiftDown(),
                 mc.screen == null && !mc.options.hideGui);
     }

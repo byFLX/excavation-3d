@@ -9,11 +9,11 @@ import com.byflx.excavation3d.editor.DraftSaveState;
 import com.byflx.excavation3d.editor.EditorDraft;
 import com.byflx.excavation3d.editor.EditorLayout;
 import com.byflx.excavation3d.editor.SessionHandshake;
+import com.byflx.excavation3d.editor.SizeRowStep;
 import com.byflx.excavation3d.net.ApplyResultPayload;
 import com.byflx.excavation3d.net.ApplyShapePayload;
 import com.byflx.excavation3d.net.BeginEditPayload;
 import com.byflx.excavation3d.net.EditSessionPayload;
-import com.byflx.excavation3d.net.RemoveShapePayload;
 import com.byflx.excavation3d.preview.ShapeDiff;
 import com.byflx.excavation3d.preview.CustomCanvas;
 import com.byflx.excavation3d.preview.PreviewPicking;
@@ -22,13 +22,11 @@ import com.byflx.excavation3d.registry.ModComponents;
 import com.byflx.excavation3d.shape.Cell;
 import com.byflx.excavation3d.shape.GeneratedShape;
 import com.byflx.excavation3d.shape.NumericInput;
-import com.byflx.excavation3d.shape.ShapeConfig;
 import com.byflx.excavation3d.shape.ShapeGenerator;
 import com.byflx.excavation3d.shape.ShapeLimits;
 import com.byflx.excavation3d.shape.ShapeType;
 import com.byflx.excavation3d.text.ShapeTexts;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +35,6 @@ import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
@@ -51,18 +48,7 @@ import net.minecraft.world.entity.player.Player;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
 
-/**
- * The shape editor (plan §2–§6, simplified by the operator correction of 2026-10-22). Left: one row
- * of shape type icons, free numeric fields with +/- buttons, direction and the custom layer editor.
- * Right: the 3D preview of the selected blocks with Rotate and Mirror icons; drag rotates, the wheel
- * zooms and a double-click resets the view. Header: the Presets menu (load, save, delete, remove
- * shape). Bottom: summary, the world preview checkbox, Cancel and Apply.
- *
- * <p>Everything the user changes lives in an {@link EditorDraft}; widgets are rebuilt from it in
- * {@link #init()}, so window resizing and GUI scale changes keep the draft. The draft only reaches
- * the tool through "Apply", and only the server's confirmation changes the tool. Cancel/Escape
- * never touch the tool; with unsaved changes a discard confirmation appears first.
- */
+/** Local draft editor. Done applies and enables through the confirmed server session; Escape discards. */
 public final class ShapeEditorScreen extends Screen {
     private static final int ROW = 22;
     private static final int MARGIN = 6;
@@ -84,10 +70,8 @@ public final class ShapeEditorScreen extends Screen {
 
     private final int slot;
     private EditorDraft draft;
-    private boolean worldPreview;
     private final DraftSaveState saveState = new DraftSaveState();
     private long submittedGeneration;
-    private boolean resultView;
     private EditorDraft.Evaluation evaluation;
     private GeneratedShape lastValid;
     private GeneratedShape customShown;
@@ -100,7 +84,6 @@ public final class ShapeEditorScreen extends Screen {
     private final SessionHandshake handshake = new SessionHandshake();
     private long revision;
     private boolean awaitingReply;
-    private boolean awaitingRemove;
     private Component status = Component.translatable("gui.excavation3d.status.connecting");
     private Component sessionFailure;
     private int statusColor = MUTED;
@@ -130,13 +113,9 @@ public final class ShapeEditorScreen extends Screen {
     private int captionWidth;
     private int hintY;
     private int statusY;
-    private int summaryY;
-    /** The summary ends left of this x, where the world preview checkbox starts. */
-    private int summaryMaxX;
     private int actionY;
     private int gridBaseY = -1;
     private int resizeBaseY = -1;
-    private Checkbox worldPreviewCheckbox;
     private int cellSize;
 
     private final Map<AbstractWidget, Integer> scrolledWidgets = new LinkedHashMap<>();
@@ -144,7 +123,9 @@ public final class ShapeEditorScreen extends Screen {
     /** Widgets on the preview; drawn after it, so the preview never covers them. */
     private final List<AbstractWidget> previewWidgets = new ArrayList<>();
     private final List<RowLabel> labels = new ArrayList<>();
-    private final Map<String, EditBox> fieldBoxes = new HashMap<>();
+    private record SizeRow(String field, int y, int valueX) { }
+    private final List<SizeRow> sizeRows = new ArrayList<>();
+    private String overwriteName;
     private EditBox layerBox;
     private Button layerMenuButton;
     private Button applyButton;
@@ -166,7 +147,6 @@ public final class ShapeEditorScreen extends Screen {
         this.draft = data != null && data.config().isPresent()
                 ? EditorDraft.fromConfig(data.config().get())
                 : EditorDraft.defaults();
-        this.worldPreview = data != null && data.worldPreview();
         this.revision = data == null ? 0L : data.revision();
         if (data != null && data.isDamaged()) {
             status = Component.translatable("gui.excavation3d.status.damaged");
@@ -189,7 +169,7 @@ public final class ShapeEditorScreen extends Screen {
         stepButtons.clear();
         previewWidgets.clear();
         labels.clear();
-        fieldBoxes.clear();
+        sizeRows.clear();
         layerBox = null;
         layerMenuButton = null;
         undoButton = null;
@@ -261,7 +241,6 @@ public final class ShapeEditorScreen extends Screen {
         leftX = MARGIN;
         leftW = layout.leftWidth();
         actionY = layout.actionY();
-        summaryY = layout.summaryY();
         statusY = layout.statusY();
         contentTop = 22;
         contentBottom = layout.contentBottom();
@@ -295,15 +274,9 @@ public final class ShapeEditorScreen extends Screen {
         labels.add(new RowLabel(ShapeTexts.fieldName(field), stacked ? y - 5 : y));
         if (stacked) y += 12;
         stepButton(field, -1, minusX, y);
-        EditBox box = new EditBox(font, boxX + 1, y + 1, FIELD_WIDTH - 2, 18, ShapeTexts.fieldName(field));
-        // One character over the parser's limit, so an over-long entry is shown as an error, not cut off.
-        box.setMaxLength(NumericInput.MAX_LENGTH + 1);
-        box.setValue(draft.text(field));
-        box.setResponder(text -> onFieldEdited(field, text));
-        scrolled(box, y + 1);
-        fieldBoxes.put(field, box);
+        sizeRows.add(new SizeRow(field, y, boxX + FIELD_WIDTH / 2));
         stepButton(field, 1, plusX, y);
-        return y + ROW;
+        return y + ROW + font.lineHeight + 2;
     }
 
     private void stepButton(String field, int delta, int x, int y) {
@@ -376,16 +349,14 @@ public final class ShapeEditorScreen extends Screen {
         return buttons;
     }
 
-    /** Rotate and Mirror (plus the schematic result view for stairs) in the preview's top right corner. */
+    /** Custom-only transforms in the preview corner. */
     private void initPreviewButtons() {
-        boolean stairLike = draft.type() == ShapeType.STAIR || draft.type() == ShapeType.CORRIDOR;
-        if (!stairLike) {
-            resultView = false;
-        }
+        layoutCaptions(previewX1);
+        if (draft.type() != ShapeType.CUSTOM) return;
         int x = previewX1 - 2 - ICON_SIZE;
         int y = previewY0 + 2;
-        int buttonsX = stairLike ? x - 2 * (ICON_SIZE + 2) : x - (ICON_SIZE + 2);
-        layoutCaptions(buttonsX, stairLike);
+        int buttonsX = x - (ICON_SIZE + 2);
+        layoutCaptions(buttonsX);
         previewWidget(IconButton.rotate(x, y, ICON_SIZE, Component.translatable("gui.excavation3d.rotate"), b -> {
             draft.rotateClockwise();
             changed();
@@ -395,26 +366,13 @@ public final class ShapeEditorScreen extends Screen {
             draft.toggleMirror();
             changed();
         }));
-        if (stairLike) {
-            x -= ICON_SIZE + 2;
-            IconButton result = IconButton.glyph(x, y, ICON_SIZE,
-                    Component.translatable("gui.excavation3d.view.result.tooltip"), "▤", b -> {
-                        resultView = !resultView;
-                        ((IconButton) b).setSelected(resultView);
-                    });
-            result.setSelected(resultView);
-            previewWidget(result);
-        }
     }
 
     /** The captions the preview can show; the strip is sized for the longest, so it never jumps. */
-    private List<Component> previewCaptions(boolean stairLike) {
+    private List<Component> previewCaptions() {
         List<Component> captions = new ArrayList<>(3);
         captions.add(Component.translatable("gui.excavation3d.preview.selection"));
         captions.add(Component.translatable("gui.excavation3d.last_valid"));
-        if (stairLike) {
-            captions.add(Component.translatable("gui.excavation3d.view.result.label"));
-        }
         return captions;
     }
 
@@ -423,11 +381,11 @@ public final class ShapeEditorScreen extends Screen {
      * caption sits beside the buttons when every caption fits there, otherwise below them, wrapped
      * to the panel width. The camera hint wraps upwards from the bottom edge.
      */
-    private void layoutCaptions(int buttonsX, boolean stairLike) {
+    private void layoutCaptions(int buttonsX) {
         int textX = previewX0 + 4;
         int fullWidth = Math.max(20, previewX1 - 4 - textX);
         int besideWidth = buttonsX - 4 - textX;
-        List<Component> captions = previewCaptions(stairLike);
+        List<Component> captions = previewCaptions();
         int widest = 0;
         for (Component caption : captions) {
             widest = Math.max(widest, font.width(caption));
@@ -442,14 +400,12 @@ public final class ShapeEditorScreen extends Screen {
         sceneY0 = Math.max(previewY0 + 2 + ICON_SIZE + 2, captionY + lines * font.lineHeight + 2);
         int hintLines = controlHints().stream().mapToInt(line -> font.split(line, fullWidth).size()).sum();
         hintY = previewY1 - 6 - hintLines * (font.lineHeight + 2);
-        sceneY1 = Math.max(sceneY0 + 1, hintY - 5);
+        sceneY1 = Math.max(sceneY0 + 1, hintY - font.lineHeight - 9);
     }
 
     private List<Component> controlHints() {
         return List.of(Component.translatable(draft.type() == ShapeType.CUSTOM
-                        ? "gui.excavation3d.preview.custom_edit" : "gui.excavation3d.preview.camera"),
-                Component.translatable(draft.type() == ShapeType.CUSTOM
-                        ? "gui.excavation3d.preview.camera" : "gui.excavation3d.preview.reset"));
+                ? "gui.excavation3d.preview.custom_edit" : "gui.excavation3d.preview.camera"));
     }
 
     private void drawWrapped(GuiGraphics graphics, Component text, int y, int maxWidth, int color) {
@@ -465,33 +421,16 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private void initHeader() {
-        Component label = Component.translatable("gui.excavation3d.presets");
+        Component label = Component.translatable("gui.excavation3d.favorite.save_as");
         int w = Math.max(70, font.width(label) + 16);
         addRenderableWidget(Button.builder(label, b -> togglePresetsMenu())
                 .bounds(width - MARGIN - w, 2, w, 18).build());
     }
 
     private void initBottom() {
-        Checkbox checkbox = Checkbox.builder(Component.translatable("gui.excavation3d.world_preview"), font)
-                .pos(0, summaryY)
-                .selected(worldPreview)
-                .onValueChange((box, value) -> {
-                    worldPreview = value;
-                    saveState.edited();
-                })
-                .build();
-        checkbox.setX(width - MARGIN - checkbox.getWidth());
-        worldPreviewCheckbox = checkbox;
-        addRenderableWidget(checkbox);
-        summaryMaxX = checkbox.getX() - 6;
-
-        int gap = 2;
-        int w = Mth.clamp((width - 2 * MARGIN - gap) / 4, 60, 100);
-        int applyX = width - MARGIN - w;
-        addRenderableWidget(Button.builder(Component.translatable("gui.cancel"), b -> onClose())
-                .bounds(applyX - gap - w, actionY, w, 20).build());
-        applyButton = addRenderableWidget(Button.builder(Component.translatable("gui.excavation3d.apply"),
-                b -> apply()).bounds(applyX, actionY, w, 20).build());
+        int w = Mth.clamp(width / 4, 60, 100);
+        applyButton = addRenderableWidget(Button.builder(Component.translatable("gui.done"),
+                b -> apply()).bounds(width - MARGIN - w, actionY, w, 20).build());
     }
 
     private <T extends AbstractWidget> T scrolled(T widget, int baseY) {
@@ -532,6 +471,7 @@ public final class ShapeEditorScreen extends Screen {
 
     private void closeMenu() {
         if (presetName != null) {
+            setFocused(null);
             removeWidget(presetName);
             removeWidget(presetSave);
         }
@@ -539,6 +479,7 @@ public final class ShapeEditorScreen extends Screen {
         presetSave = null;
         menu = null;
         openMenu = Menu.NONE;
+        overwriteName = null;
     }
 
     private void togglePresetsMenu() {
@@ -549,34 +490,13 @@ public final class ShapeEditorScreen extends Screen {
         }
     }
 
-    /**
-     * Presets (plan §9): a name field with Save, the saved presets (click loads, × deletes) and,
-     * separated, "Remove shape" for the tool itself.
-     */
+    /** Small inline favorite name field, with a second Save confirming overwrite. */
     private void openPresetsMenu() {
         int menuW = Math.min(width - 2 * MARGIN, 180);
         int x = width - MARGIN - menuW;
         int y = contentTop;
         int header = 24;
-        List<DropdownMenu.Entry> entries = new ArrayList<>();
-        List<String> names = PresetRepository.get().names();
-        if (names.isEmpty()) {
-            entries.add(new DropdownMenu.Entry(Component.translatable("gui.excavation3d.preset.none"), () -> false,
-                    () -> {
-                    }, null));
-        }
-        for (String name : names) {
-            entries.add(new DropdownMenu.Entry(Component.literal(name), () -> true, () -> loadPreset(name),
-                    () -> deletePreset(name)));
-        }
-        entries.add(DropdownMenu.Entry.separator());
-        entries.add(new DropdownMenu.Entry(Component.translatable("gui.excavation3d.remove"), this::canRemove,
-                () -> {
-                    closeMenu();
-                    removeShape();
-                }, null));
-        menu = new DropdownMenu(x, y, menuW, header, height - 30, entries,
-                Component.translatable("gui.excavation3d.preset.delete"));
+        menu = new DropdownMenu(x, y, menuW, header + 14, height - 30, List.of(), Component.empty());
         openMenu = Menu.PRESETS;
 
         Component saveLabel = Component.translatable("gui.excavation3d.preset.save");
@@ -587,7 +507,10 @@ public final class ShapeEditorScreen extends Screen {
         presetName.setHint(Component.translatable("gui.excavation3d.preset.name"));
         presetName.setValue(presetCursor);
         // Kept as typed, so a resize or GUI scale change (which rebuilds the screen) never loses it.
-        presetName.setResponder(text -> presetCursor = text);
+        presetName.setResponder(text -> {
+            presetCursor = text;
+            overwriteName = null;
+        });
         presetSave = Button.builder(saveLabel, b -> savePreset())
                 .bounds(x + menuW - 4 - saveW, y + 3, saveW, 18).build();
         addWidget(presetName);
@@ -668,18 +591,10 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private void step(String field, int delta) {
-        draft.stepped(field, delta, limits()).ifPresent(text -> fieldBoxes.get(field).setValue(text));
-    }
-
-    /** Writes the draft's texts back into the boxes, e.g. after undo changed them. */
-    private void syncFieldBoxes() {
-        for (Map.Entry<String, EditBox> entry : fieldBoxes.entrySet()) {
-            String text = draft.text(entry.getKey());
-            if (!entry.getValue().getValue().equals(text)) {
-                entry.getValue().setValue(text);
-            }
+        if (NumericInput.parse(draft.text(field), 1, ShapeLimits.TECHNICAL_MAX_AXIS) instanceof NumericInput.Valid valid) {
+            int next = SizeRowStep.next(valid.value(), delta, hasShiftDown(), 1, limits().maxAxis());
+            if (next != valid.value()) onFieldEdited(field, Integer.toString(next));
         }
-        changed();
     }
 
     private void handleCustomResize() {
@@ -717,7 +632,7 @@ public final class ShapeEditorScreen extends Screen {
     private void cancelResize() {
         pendingResize = null;
         draft.syncCustomTexts();
-        syncFieldBoxes();
+        changed();
     }
 
     private void afterResize() {
@@ -731,7 +646,7 @@ public final class ShapeEditorScreen extends Screen {
         pendingResize = null;
         draft.syncCustomTexts();
         afterResize();
-        syncFieldBoxes();
+        changed();
     }
 
     private void customEdited(boolean changedSomething) {
@@ -793,12 +708,6 @@ public final class ShapeEditorScreen extends Screen {
         }
         sizeEdited = false;
         shape.ifPresent(s -> lastValid = s);
-        for (Map.Entry<String, EditBox> entry : fieldBoxes.entrySet()) {
-            NumericInput.Problem problem = evaluation.fieldErrors().get(entry.getKey());
-            entry.getValue().setTextColor(problem == null ? TEXT : ERROR);
-            entry.getValue().setTooltip(problem == null ? null
-                    : Tooltip.create(ShapeTexts.problem(entry.getKey(), problem, 1, limits().maxAxis())));
-        }
         if (undoButton != null) {
             undoButton.active = draft.custom().canUndo();
             redoButton.active = draft.custom().canRedo();
@@ -850,39 +759,18 @@ public final class ShapeEditorScreen extends Screen {
         };
     }
 
-    /** Only a tool that carries a shape can lose it; the held stack follows the server's slot sync. */
-    private boolean canRemove() {
-        return handshake.sessionId() != 0 && !awaitingReply && minecraft != null && minecraft.player != null
-                && minecraft.player.getInventory().getItem(slot).has(ModComponents.TOOL_SHAPE.get());
-    }
-
-    // ---------------------------------------------------------------- presets
-
-    private void loadPreset(String name) {
-        Optional<ShapeConfig> preset = PresetRepository.get().find(name);
-        if (preset.isEmpty()) {
-            setStatus(Component.translatable("gui.excavation3d.preset.missing", name.trim()), ERROR);
-            closeMenu();
-            return;
-        }
-        // Loaded as a draft; the evaluation applies this server's limits again.
-        draft = EditorDraft.fromConfig(preset.get());
-        presetCursor = name;
-        pendingResize = null;
-        anchorMode = false;
-        layer = 0;
-        scroll = 0;
-        saveState.edited();
-        setStatus(Component.translatable("gui.excavation3d.preset.loaded", name.trim()), OK);
-        rebuildWidgets();
-    }
+    // ---------------------------------------------------------------- favorites
 
     private void savePreset() {
-        if (evaluation == null || evaluation.config() == null) {
+        if (evaluation == null || !evaluation.isValid() || pendingResize != null) {
             setStatus(Component.translatable("gui.excavation3d.preset.unsavable"), ERROR);
             return;
         }
         String name = presetName == null ? presetCursor : presetName.getValue();
+        if (PresetRepository.get().find(name).isPresent() && !name.trim().equals(overwriteName)) {
+            overwriteName = name.trim();
+            return;
+        }
         switch (PresetRepository.get().save(name, evaluation.config())) {
             case SAVED -> {
                 setStatus(Component.translatable("gui.excavation3d.preset.saved", name.trim()), OK);
@@ -896,49 +784,19 @@ public final class ShapeEditorScreen extends Screen {
         }
     }
 
-    private void deletePreset(String name) {
-        if (PresetRepository.get().delete(name)) {
-            setStatus(Component.translatable("gui.excavation3d.preset.deleted", name.trim()), OK);
-        } else {
-            setStatus(Component.translatable("gui.excavation3d.preset.missing", name.trim()), ERROR);
-        }
-        // Reopen, so the list shows the remaining presets.
-        closeMenu();
-        openPresetsMenu();
-    }
-
     // ---------------------------------------------------------------- server protocol
 
     private void apply() {
         if (!canApply()) {
             return;
         }
+        cancelPointer();
+        closeAfterApply = true;
         awaitingReply = true;
         submittedGeneration = saveState.submit();
         setStatus(Component.translatable("gui.excavation3d.status.applying"), MUTED);
         PacketDistributor.sendToServer(new ApplyShapePayload(handshake.sessionId(), slot, revision,
-                evaluation.config(), worldPreview));
-        refresh();
-    }
-
-    /**
-     * "Remove shape" (plan §2a), in the Presets menu: the server deletes the whole component, so the
-     * tool mines like vanilla again. The draft stays, so the shape can be applied again from here.
-     */
-    private void removeShape() {
-        if (!canRemove()) {
-            return;
-        }
-        awaitingReply = true;
-        awaitingRemove = true;
-        ToolShapeData removing = minecraft.player == null ? null
-                : minecraft.player.getMainHandItem().get(ModComponents.TOOL_SHAPE.get());
-        if (minecraft.player != null && removing != null) {
-            ClientState.expectRemoval(handshake.sessionId(), minecraft.player.getUUID(),
-                    removing.config().orElse(null), removing.worldPreview());
-        }
-        setStatus(Component.translatable("gui.excavation3d.status.applying"), MUTED);
-        PacketDistributor.sendToServer(new RemoveShapePayload(handshake.sessionId(), slot, revision));
+                evaluation.config()));
         refresh();
     }
 
@@ -981,17 +839,7 @@ public final class ShapeEditorScreen extends Screen {
         }
         awaitingReply = false;
         if (payload.accepted()) com.byflx.excavation3d.client.ToolHud.confirmedChange();
-        if (awaitingRemove) {
-            awaitingRemove = false;
-            if (payload.accepted()) {
-                revision = payload.revision();
-                setStatus(payload.message(), OK);
-            } else {
-                setStatus(payload.message(), ERROR);
-            }
-            refresh();
-            return;
-        }
+
         if (payload.accepted()) {
             revision = payload.revision();
             if (!saveState.accepted(submittedGeneration)) {
@@ -1097,6 +945,7 @@ public final class ShapeEditorScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (awaitingReply) return true;
         if (menu != null) {
             // Escape closes the open menu first, not the editor.
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
@@ -1125,7 +974,13 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     @Override
+    public boolean charTyped(char character, int modifiers) {
+        return awaitingReply || super.charTyped(character, modifiers);
+    }
+
+    @Override
     public boolean mouseClicked(double mx, double my, int button) {
+        if (awaitingReply) return true;
         cancelPointer();
         if (menu != null || !inPreview(mx, my)) previewGesture.reset();
         if (menu != null) {
@@ -1192,6 +1047,7 @@ public final class ShapeEditorScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+        if (awaitingReply) return true;
         reconcilePointer(mx, my);
         if (!buttonHeld(button)) return false;
         PreviewGesture.Motion motion = previewGesture.drag(button, mx, my, dx, dy,
@@ -1210,6 +1066,10 @@ public final class ShapeEditorScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
+        if (awaitingReply) {
+            cancelPointer();
+            return super.mouseReleased(mx, my, button);
+        }
         PreviewGesture.Release released = previewGesture.release(button, mx, my, inPreview(mx, my), Util.getMillis());
         // Always let Screen clear its widget drag too, including releases outside the panel.
         boolean widgetReleased = super.mouseReleased(mx, my, button);
@@ -1225,6 +1085,7 @@ public final class ShapeEditorScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double scrollX, double scrollY) {
+        if (awaitingReply) return true;
         if (menu != null) {
             if (menu.contains(mx, my)) {
                 menu.scroll(scrollY);
@@ -1236,6 +1097,15 @@ public final class ShapeEditorScreen extends Screen {
         if (inPreview(mx, my)) {
             camera.scroll(scrollY);
             return true;
+        }
+        if (mx >= leftX && mx < leftX + leftW && my >= contentTop && my < contentBottom) {
+            for (SizeRow row : sizeRows) {
+                int y = row.y() - scroll;
+                if (my >= y && my < y + ROW + font.lineHeight + 2) {
+                    if (scrollY != 0) step(row.field(), (int) Math.signum(scrollY));
+                    return true;
+                }
+            }
         }
         if (mx >= leftX && mx < leftX + leftW && my >= contentTop && my < contentBottom && maxScroll() > 0) {
             scroll = Mth.clamp(scroll - (int) Math.round(scrollY * ROW), 0, maxScroll());
@@ -1294,6 +1164,7 @@ public final class ShapeEditorScreen extends Screen {
                 }
             }
         }
+        renderSizeRows(graphics);
         renderGrid(graphics, mx, my);
         graphics.disableScissor();
         if (maxScroll() > 0) {
@@ -1313,9 +1184,59 @@ public final class ShapeEditorScreen extends Screen {
             if (presetName != null) {
                 presetName.render(graphics, mouseX, mouseY, partialTick);
                 presetSave.render(graphics, mouseX, mouseY, partialTick);
+                if (overwriteName != null) {
+                    Component confirm = Component.translatable("gui.excavation3d.favorite.overwrite", overwriteName);
+                    float scale = Math.min(1.0F, (float) (menu.width() - 8) / Math.max(1, font.width(confirm)));
+                    graphics.pose().pushPose();
+                    graphics.pose().translate(menu.x() + 4, menu.y() + 26, 0);
+                    graphics.pose().scale(scale, scale, 1);
+                    graphics.drawString(font, confirm, 0, 0, WARN);
+                    graphics.pose().popPose();
+                }
             }
             graphics.pose().popPose();
         }
+    }
+
+    private void renderSizeRows(GuiGraphics graphics) {
+        for (SizeRow row : sizeRows) {
+            int y = row.y() - scroll;
+            Component error = rowProblem(row.field());
+            graphics.pose().pushPose();
+            graphics.pose().translate(row.valueX(), y + 4, 0);
+            graphics.pose().scale(1.4F, 1.4F, 1);
+            graphics.drawCenteredString(font, draft.text(row.field()), 0, 0, error == null ? TEXT : ERROR);
+            graphics.pose().popPose();
+            if (error != null) {
+                graphics.drawString(font, firstLine(error, leftW), leftX, y + ROW, ERROR);
+            }
+        }
+    }
+
+    private Component rowProblem(String field) {
+        if (evaluation == null) return null;
+        NumericInput.Problem problem = evaluation.fieldErrors().get(field);
+        if (problem != null) return ShapeTexts.problem(field, problem, 1, limits().maxAxis());
+        if (evaluation.result() instanceof ShapeGenerator.Invalid invalid) {
+            return invalid.issues().stream().filter(issue -> issue.field().equals(field)
+                    || ((draft.type() == ShapeType.STAIR || draft.type() == ShapeType.CORRIDOR)
+                            && (issue.field().equals("height") && (field.equals(EditorDraft.STEPS)
+                                    || field.equals(EditorDraft.STEP_HEIGHT) || field.equals(EditorDraft.CLEARANCE))
+                                || issue.field().equals("depth") && (field.equals(EditorDraft.STEPS)
+                                    || field.equals(EditorDraft.STEP_DEPTH))))
+                    || (field.equals(EditorDraft.fields(draft.type()).getFirst())
+                            && !EditorDraft.fields(draft.type()).contains(issue.field())))
+                    .findFirst().map(ShapeTexts::issue).orElse(null);
+        }
+        if (draft.type() == ShapeType.CUSTOM && evaluation.resizePending()) {
+            int actual = switch (field) {
+                case EditorDraft.WIDTH -> draft.custom().width();
+                case EditorDraft.HEIGHT -> draft.custom().height();
+                default -> draft.custom().depth();
+            };
+            if (!Integer.toString(actual).equals(draft.text(field))) return currentProblem();
+        }
+        return null;
     }
 
     private void renderGrid(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -1367,22 +1288,28 @@ public final class ShapeEditorScreen extends Screen {
         GeneratedShape shown = current != null ? current : lastValid;
         boolean custom = draft.type() == ShapeType.CUSTOM;
         if (custom) shown = customPreview();
-        boolean stairLike = draft.type() == ShapeType.STAIR || draft.type() == ShapeType.CORRIDOR;
         if (shown != null) {
             // Only the scene between the caption and hint strips, so the shape and its labels never cover them.
             preview.render(graphics, font, previewX0 + 1, sceneY0, previewX1 - 1, sceneY1, shown, camera,
-                    resultView && stairLike, custom, layer, mouseX, mouseY, anchorMode);
+                    false, custom, layer, mouseX, mouseY, anchorMode);
         }
         graphics.enableScissor(previewX0 + 1, previewY0 + 1, previewX1 - 1, previewY1 - 1);
         if (!custom && current == null && lastValid != null) {
             drawWrapped(graphics, Component.translatable("gui.excavation3d.last_valid"), captionY, captionWidth,
                     WARN);
-        } else if (resultView && stairLike) {
-            drawWrapped(graphics, Component.translatable("gui.excavation3d.view.result.label"), captionY,
-                    captionWidth, WARN);
         } else {
             drawWrapped(graphics, Component.translatable("gui.excavation3d.preview.selection"), captionY,
                     captionWidth, MUTED);
+        }
+        if (shown != null) {
+            Component summary = Component.translatable("gui.excavation3d.preview.summary",
+                    shown.width(), shown.height(), shown.depth(), shown.count());
+            float scale = Math.min(1.0F, (float) (previewX1 - previewX0 - 8) / Math.max(1, font.width(summary)));
+            graphics.pose().pushPose();
+            graphics.pose().translate(previewX0 + 4, sceneY1 + 4, 0);
+            graphics.pose().scale(scale, scale, 1);
+            graphics.drawString(font, summary, 0, 0, current == null ? MUTED : TEXT);
+            graphics.pose().popPose();
         }
         int helpY = hintY;
         for (Component hint : controlHints()) {
@@ -1398,37 +1325,7 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private void renderSummary(GuiGraphics graphics) {
-        GeneratedShape current = evaluation == null ? null : evaluation.shape().orElse(null);
-        GeneratedShape shown = current != null ? current : lastValid;
-        if (draft.type() == ShapeType.CUSTOM) shown = customPreview();
-        if (shown != null) {
-            // The summary shares its row with the world preview checkbox: keep left of it, wrap if needed.
-            int maxWidth = Math.max(20, summaryMaxX - leftX);
-            int color = current != null ? TEXT : MUTED;
-            Component extents = ShapeTexts.extents(shown);
-            Component selected = ShapeTexts.selected(shown);
-            if (font.width(extents) <= leftW && previewX0 + font.width(selected) <= summaryMaxX) {
-                graphics.drawString(font, extents, leftX, summaryY + 6, color);
-                graphics.drawString(font, selected, previewX0, summaryY + 6, color);
-            } else {
-                graphics.drawString(font, firstLine(extents, maxWidth), leftX, summaryY + 1, color);
-                graphics.drawString(font, firstLine(selected, maxWidth), leftX, summaryY + 11, color);
-            }
-        }
-        // Put the explicit box above the vanilla sprite, even with queued GUI batches/depth writes.
-        graphics.flush();
-        graphics.pose().pushPose();
-        graphics.pose().translate(0.0F, 0.0F, 200.0F);
-        int boxSize = Checkbox.getBoxSize(font);
-        int boxX = worldPreviewCheckbox.getX(), boxY = worldPreviewCheckbox.getY();
-        boolean highlighted = worldPreviewCheckbox.isHoveredOrFocused();
-        if (!worldPreviewCheckbox.selected()) {
-            graphics.fill(boxX + 1, boxY + 1, boxX + boxSize - 1, boxY + boxSize - 1,
-                    highlighted ? 0xFF34445A : 0xFF161D27);
-        }
-        graphics.renderOutline(boxX, boxY, boxSize, boxSize, highlighted ? 0xFFFFFFFF : 0xFFB9C4D1);
-        graphics.flush();
-        graphics.pose().popPose();
+        graphics.drawString(font, Component.translatable("gui.excavation3d.escape_hint"), leftX, actionY + 6, MUTED);
         Component problem = applyProblem();
         Component message = problem != null ? problem : status;
         int color = currentProblem() != null ? ERROR : statusColor;

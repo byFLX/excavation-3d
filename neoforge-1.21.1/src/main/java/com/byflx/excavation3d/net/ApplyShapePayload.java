@@ -13,8 +13,7 @@ import net.minecraft.resources.ResourceLocation;
  * expected revision and the whole shape before anything changes. Malformed or oversized shape data
  * fails decoding in {@link ShapeCodecs#readConfig}.
  */
-public record ApplyShapePayload(int sessionId, int slot, long expectedRevision, ShapeConfig config,
-        boolean worldPreview) implements CustomPacketPayload {
+public record ApplyShapePayload(int sessionId, int slot, long expectedRevision, ShapeConfig config) implements CustomPacketPayload {
     public static final Type<ApplyShapePayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(Excavation3D.MOD_ID, "apply_shape"));
     public static final StreamCodec<FriendlyByteBuf, ApplyShapePayload> STREAM_CODEC =
@@ -25,7 +24,6 @@ public record ApplyShapePayload(int sessionId, int slot, long expectedRevision, 
         buf.writeVarInt(slot);
         buf.writeVarLong(expectedRevision);
         ShapeCodecs.writeConfig(buf, config);
-        buf.writeBoolean(worldPreview);
     }
 
     private static ApplyShapePayload read(FriendlyByteBuf buf) {
@@ -33,7 +31,7 @@ public record ApplyShapePayload(int sessionId, int slot, long expectedRevision, 
         int slot = buf.readVarInt();
         long expectedRevision = buf.readVarLong();
         ShapeConfig config = ShapeCodecs.readConfig(buf, 0L);
-        return new ApplyShapePayload(sessionId, slot, expectedRevision, config, buf.readBoolean());
+        return new ApplyShapePayload(sessionId, slot, expectedRevision, config);
     }
 
     @Override

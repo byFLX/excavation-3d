@@ -10,13 +10,11 @@
   "key.excavation3d.apply_preset_3": "Apply preset 3",
   "key.excavation3d.apply_preset_4": "Apply preset 4",
   "key.excavation3d.apply_preset_5": "Apply preset 5",
-
   "shape.excavation3d.cuboid": "Cuboid",
   "shape.excavation3d.plus": "Plus",
   "shape.excavation3d.stair": "Stepped mass (excavation)",
   "shape.excavation3d.corridor": "Stair corridor",
   "shape.excavation3d.custom": "Custom",
-
   "field.excavation3d.width": "Width",
   "field.excavation3d.height": "Height",
   "field.excavation3d.depth": "Depth",
@@ -29,7 +27,6 @@
   "field.excavation3d.mask": "Custom shape",
   "field.excavation3d.anchor": "Start block",
   "field.excavation3d.formatVersion": "Format version",
-
   "issue.excavation3d.value_too_small": "%1$s must be at least %3$s (is %2$s)",
   "issue.excavation3d.arm_too_thick": "%1$s %2$s is thicker than the cross-section (max %3$s)",
   "issue.excavation3d.size_overflow": "%1$s: the resulting size is far too large",
@@ -39,7 +36,6 @@
   "issue.excavation3d.anchor_not_selected": "The start block is not a selected block",
   "issue.excavation3d.anchor_not_in_front_layer": "The start block must be in the frontmost used layer",
   "issue.excavation3d.unsupported_format_version": "Unsupported data version %2$s (supported: %3$s)",
-
   "problem.excavation3d.empty": "%1$s: enter a number",
   "problem.excavation3d.too_long": "%1$s: input too long",
   "problem.excavation3d.negative": "%1$s: negative numbers are not allowed",
@@ -47,7 +43,6 @@
   "problem.excavation3d.not_integer": "%1$s: not a number",
   "problem.excavation3d.below_min": "%1$s: at least %2$s",
   "problem.excavation3d.above_max": "%1$s: at most %3$s",
-
   "tool.excavation3d.not_configured": "Off",
   "tool.excavation3d.named": "%1$s · %2$s",
   "tool.excavation3d.damaged": "Stored shape unreadable - mines single blocks",
@@ -55,10 +50,8 @@
   "tool.excavation3d.invalid": "Shape not allowed here: %1$s - single blocks",
   "tool.excavation3d.single_block": "Single block (key held)",
   "tool.excavation3d.hint": "Tap %1$s: editor · hold %1$s: presets · hold %2$s: single block",
-
   "hud.excavation3d.preview.short": "%s blocks",
   "hud.excavation3d.preview": "Present %1$s · Air %2$s · Excluded %3$s · Not loaded %4$s · Protection: decided by server",
-
   "message.excavation3d.applied": "Shape applied",
   "message.excavation3d.removed": "Shape removed - the tool mines normally again",
   "message.excavation3d.reject.not_holding_tool": "Hold a pickaxe, shovel or axe in your main hand",
@@ -73,13 +66,11 @@
   "message.excavation3d.creative_single_block": "Creative mode: shapes need survival mining - single block only",
   "message.excavation3d.result": "Shape excavation: %1$s mined, %2$s skipped",
   "message.excavation3d.aborted": "Shape excavation stopped (%1$s): %2$s mined, %3$s skipped",
-
   "abort.excavation3d.tool_changed": "tool changed",
   "abort.excavation3d.tool_broken": "tool broke",
   "abort.excavation3d.player_gone": "player left",
   "abort.excavation3d.died": "player died",
   "abort.excavation3d.dimension_changed": "dimension changed",
-
   "skip.excavation3d.air": "air: %s",
   "skip.excavation3d.outside_world": "outside the world: %s",
   "skip.excavation3d.unloaded": "not loaded: %s",
@@ -90,7 +81,6 @@
   "skip.excavation3d.refused": "refused removal: %s",
   "skip.excavation3d.wrong_tool": "wrong tool or tier: %s",
   "skip.excavation3d.harder_than_start": "harder than the start block: %s",
-
   "gui.excavation3d.title": "Excavation 3D",
   "gui.excavation3d.shape": "Shape",
   "gui.excavation3d.status.connecting": "Connecting to the server…",
@@ -130,8 +120,8 @@
   "gui.excavation3d.preview.selection": "Blocks selected for mining",
   "gui.excavation3d.preview.controls": "Drag: rotate · Wheel: zoom · Double-click: reset",
   "gui.excavation3d.preview.custom_controls": "Click: add · Right-click: remove · Drag: rotate · Wheel: zoom",
-  "gui.excavation3d.preview.camera": "Drag: rotate · Wheel: zoom",
-  "gui.excavation3d.preview.custom_edit": "Click: add · Right: remove",
+  "gui.excavation3d.preview.camera": "Drag to rotate",
+  "gui.excavation3d.preview.custom_edit": "Click: add · Right-click: remove · Drag: rotate",
   "gui.excavation3d.preview.reset": "Double-click: reset",
   "gui.excavation3d.last_valid": "Last valid preview",
   "gui.excavation3d.axis.width": "Width %s",
@@ -148,7 +138,7 @@
   "gui.excavation3d.preset.missing": "No preset named \"%s\"",
   "gui.excavation3d.preset.loaded": "Preset \"%s\" loaded as draft",
   "gui.excavation3d.preset.unsavable": "Fix the fields before saving",
-  "gui.excavation3d.preset.saved": "Preset \"%s\" saved",
+  "gui.excavation3d.preset.saved": "Favorite saved: %s",
   "gui.excavation3d.preset.invalid_name": "Enter a name (at most %s characters)",
   "gui.excavation3d.preset.full": "At most %s presets",
   "gui.excavation3d.preset.io_error": "Presets could not be saved",
@@ -173,7 +163,7 @@
   "gui.excavation3d.quick.apply": "to apply",
   "gui.excavation3d.quick.cancel": "Cancel",
   "gui.excavation3d.quick.cancel.short": "to cancel",
-  "gui.excavation3d.quick.hint": "Release %s to apply · Esc to cancel",
+  "gui.excavation3d.quick.hint": "Release %s to select · Right-click favorite twice to delete",
   "gui.excavation3d.quick.hint.short": "%s: apply · Esc: cancel",
   "gui.excavation3d.quick.details": "%1$s × %2$s × %3$s · %4$s blocks",
   "gui.excavation3d.quick.active": " · active",
@@ -184,11 +174,25 @@
   "gui.excavation3d.quick.applied_off": "Shape off",
   "gui.excavation3d.discard.title": "Discard changes?",
   "gui.excavation3d.discard.message": "The tool keeps its current shape.",
-
   "excavation3d.configuration.limits": "Limits",
   "excavation3d.configuration.maxAxis": "Max. extent per axis",
   "excavation3d.configuration.maxSelected": "Max. selected blocks",
   "excavation3d.configuration.budget": "Work budget",
   "excavation3d.configuration.perPlayerPerTick": "Positions per player and tick",
-  "excavation3d.configuration.globalPerTick": "Positions per tick (all players)"
+  "excavation3d.configuration.globalPerTick": "Positions per tick (all players)",
+  "gui.excavation3d.favorite.save_as": "Save as favorite",
+  "gui.excavation3d.favorite.overwrite": "Overwrite %s? Save again.",
+  "gui.excavation3d.escape_hint": "Esc closes without changes",
+  "gui.excavation3d.preview.summary": "%s × %s × %s · %s blocks",
+  "gui.excavation3d.builtin.tunnel_small": "Tunnel 1×2",
+  "gui.excavation3d.builtin.tunnel_large": "Tunnel 3×3",
+  "gui.excavation3d.builtin.floor": "Floor 5×5",
+  "gui.excavation3d.builtin.stairs": "Stairs",
+  "gui.excavation3d.quick.on": "On",
+  "gui.excavation3d.quick.built_in": "Built-in",
+  "gui.excavation3d.quick.delete_confirm": "Delete %s? Right-click again",
+  "tool.excavation3d.paused": "Off · %s",
+  "message.excavation3d.enabled": "Shape on",
+  "message.excavation3d.paused": "Shape off",
+  "message.excavation3d.reject.no_shape": "This tool has no shape to enable."
 }

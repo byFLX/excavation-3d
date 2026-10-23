@@ -20,7 +20,6 @@ public final class ClientPayloadHandler {
     }
 
     public static void onApplyResult(ApplyResultPayload payload) {
-        ClientState.removalResult(payload.sessionId(), payload.accepted());
         QuickShapeAction.onResult(payload);
         ShapeEditorScreen editor = ClientState.editor();
         if (editor != null) {

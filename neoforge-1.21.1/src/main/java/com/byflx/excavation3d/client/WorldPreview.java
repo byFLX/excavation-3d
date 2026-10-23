@@ -131,7 +131,7 @@ public final class WorldPreview {
         }
         ItemStack tool = player.getMainHandItem();
         ToolShapeData data = ModTags.shapeOf(tool);
-        if (data == null || !data.worldPreview() || data.config().isEmpty()) {
+        if (data == null || !data.enabled() || !com.byflx.excavation3d.config.ClientConfig.worldPreview() || data.config().isEmpty()) {
             clearTarget();
             return;
         }

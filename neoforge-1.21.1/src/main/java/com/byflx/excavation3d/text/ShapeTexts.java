@@ -64,10 +64,14 @@ public final class ShapeTexts {
         ShapeGenerator.Result result = ShapeGenerator.generate(data.config().get(), limits);
         if (result instanceof ShapeGenerator.Valid valid) {
             GeneratedShape shape = valid.shape();
-            return Component.translatable("tool." + NS + ".active", typeName(data.config().get().type()),
-                    shape.width(), shape.height(), shape.depth(), shape.count()).withStyle(ChatFormatting.AQUA);
+            MutableComponent summary = Component.translatable("tool." + NS + ".active", typeName(data.config().get().type()),
+                    shape.width(), shape.height(), shape.depth(), shape.count());
+            return data.enabled() ? summary.withStyle(ChatFormatting.AQUA)
+                    : Component.translatable("tool." + NS + ".paused", summary).withStyle(ChatFormatting.GRAY);
         }
         ShapeIssue first = ((ShapeGenerator.Invalid) result).issues().get(0);
-        return Component.translatable("tool." + NS + ".invalid", issue(first)).withStyle(ChatFormatting.RED);
+        MutableComponent invalid = Component.translatable("tool." + NS + ".invalid", issue(first));
+        return data.enabled() ? invalid.withStyle(ChatFormatting.RED)
+                : Component.translatable("tool." + NS + ".paused", invalid).withStyle(ChatFormatting.GRAY);
     }
 }

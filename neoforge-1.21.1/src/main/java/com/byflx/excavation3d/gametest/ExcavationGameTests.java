@@ -190,6 +190,26 @@ public final class ExcavationGameTests {
         });
     }
 
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void pausedToolMinesOnlyOneBlockAndRetainsShape(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        ItemStack tool = player.getMainHandItem();
+        ToolShapeData paused = tool.get(ModComponents.TOOL_SHAPE.get()).withEnabled(false, 2L);
+        tool.set(ModComponents.TOOL_SHAPE.get(), paused);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            helper.assertBlockNotPresent(Blocks.DIRT, START);
+            for (BlockPos pos : wall()) {
+                if (!pos.equals(START)) helper.assertBlockPresent(Blocks.DIRT, pos);
+            }
+            expectItems(helper, Items.DIRT, 1);
+            expectDamage(helper, player, 1);
+            expectShape(helper, tool, paused);
+            finish(helper, player);
+        });
+    }
+
     /** A tool without a shape stays vanilla (plan §2a): one block, one point of wear, no message. */
     @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
     public static void unconfiguredToolMinesOneBlock(GameTestHelper helper) {
@@ -423,7 +443,7 @@ public final class ExcavationGameTests {
         if (!tool.is(ModTags.SHAPE_TOOLS)) {
             helper.fail(item + " is not in excavation3d:shape_tools");
         }
-        tool.set(ModComponents.TOOL_SHAPE.get(), ToolShapeData.fresh().withConfig(ShapeConfig.of(params), 1L, false));
+        tool.set(ModComponents.TOOL_SHAPE.get(), ToolShapeData.fresh().withConfig(ShapeConfig.of(params), 1L));
         return tool;
     }
 

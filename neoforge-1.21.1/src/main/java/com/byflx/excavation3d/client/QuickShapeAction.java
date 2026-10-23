@@ -6,7 +6,7 @@ import com.byflx.excavation3d.net.ApplyResultPayload;
 import com.byflx.excavation3d.net.ApplyShapePayload;
 import com.byflx.excavation3d.net.BeginEditPayload;
 import com.byflx.excavation3d.net.EditSessionPayload;
-import com.byflx.excavation3d.net.RemoveShapePayload;
+import com.byflx.excavation3d.net.SetShapeEnabledPayload;
 import com.byflx.excavation3d.registry.ModComponents;
 import com.byflx.excavation3d.registry.ModTags;
 import com.byflx.excavation3d.shape.ShapeConfig;
@@ -19,7 +19,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 
-/** Quick selection uses the editor's existing Begin -> session -> Apply/Remove -> confirmation protocol. */
+/** Quick selection uses the editor's existing Begin -> session -> Apply/SetEnabled -> confirmation protocol. */
 public final class QuickShapeAction {
     private static QuickShapeAction pending;
     private record PresetSelection(UUID player, int slot, Object item, String name, ShapeConfig config) { }
@@ -29,18 +29,15 @@ public final class QuickShapeAction {
     private final ItemStack stack;
     private final ShapeConfig config;
     private final ToolShapeData previous;
-    private final boolean worldPreview;
-    private Component confirmationHint;
     private final String presetName;
     private int replyTicks;
     private boolean submitted;
 
-    private QuickShapeAction(Minecraft mc, ShapeConfig config, boolean worldPreview, String presetName) {
+    private QuickShapeAction(Minecraft mc, ShapeConfig config, String presetName) {
         slot = mc.player.getInventory().selected;
         stack = mc.player.getMainHandItem();
         previous = stack.get(ModComponents.TOOL_SHAPE.get());
         this.config = config;
-        this.worldPreview = worldPreview;
         this.presetName = presetName;
     }
 
@@ -58,35 +55,32 @@ public final class QuickShapeAction {
                 ? confirmedPreset.name() : null;
     }
 
-    public static void startPreset(ShapeConfig config, boolean worldPreview, String name) {
-        start(config, worldPreview, name);
+    public static void startPreset(ShapeConfig config, String name) {
+        start(config, name);
     }
 
-    /** Reapply the unchanged config with only the preview flag flipped, after server confirmation. */
+    /** Client preference: no edit session or server packet. */
     public static void toggleWorldPreview() {
-        Minecraft mc = Minecraft.getInstance();
-        if (busy() || mc.screen != null || mc.player == null) return;
-        ToolShapeData data = ModTags.shapeOf(mc.player.getMainHandItem());
-        if (data == null || data.config().isEmpty()) return;
-        boolean enabled = !data.worldPreview();
-        start(data.config().get(), enabled, confirmedPresetName());
-        if (pending != null && !pending.submitted) {
-            pending.confirmationHint = Component.translatable(enabled
-                    ? "tool.excavation3d.world_preview.on" : "tool.excavation3d.world_preview.off")
-                    .withStyle(ChatFormatting.GRAY);
-        }
+        boolean enabled = com.byflx.excavation3d.config.ClientConfig.toggleWorldPreview();
+        ToolHud.feedback(Component.translatable(enabled
+                ? "tool.excavation3d.world_preview.on" : "tool.excavation3d.world_preview.off")
+                .withStyle(ChatFormatting.GRAY));
     }
 
-    /** Null config means Off. No local item component is ever changed. */
-    public static void start(ShapeConfig config, boolean worldPreview) {
-        start(config, worldPreview, null);
+    /** Null config toggles enabled. No local item component is ever changed. */
+    public static void start(ShapeConfig config) {
+        start(config, null);
     }
 
-    private static void start(ShapeConfig config, boolean worldPreview, String presetName) {
+    private static void start(ShapeConfig config, String presetName) {
         Minecraft mc = Minecraft.getInstance();
         if (busy() || mc.screen != null || mc.player == null || mc.getConnection() == null
                 || !mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) return;
-        pending = new QuickShapeAction(mc, config, worldPreview, presetName);
+        if (config == null) {
+            ToolShapeData data = ModTags.shapeOf(mc.player.getMainHandItem());
+            if (data == null || data.config().isEmpty()) return;
+        }
+        pending = new QuickShapeAction(mc, config, presetName);
         PacketDistributor.sendToServer(new BeginEditPayload(pending.handshake.start(), pending.slot));
     }
 
@@ -116,7 +110,7 @@ public final class QuickShapeAction {
             finish(Component.translatable("message.excavation3d.reject.tool_changed"));
             return;
         }
-        // In particular, Off must remember the exact revision that it is about to remove.
+        // Toggling must target the exact revision observed before opening the session.
         long expectedRevision = pending.previous == null ? 0L : pending.previous.revision();
         if (payload.revision() != expectedRevision) {
             finish(Component.translatable("message.excavation3d.reject.revision"));
@@ -129,13 +123,10 @@ public final class QuickShapeAction {
         }
         pending.submitted = true;
         if (pending.config == null) {
-            if (pending.previous != null) {
-                ClientState.expectRemoval(payload.sessionId(), mc.player.getUUID(),
-                        pending.previous.config().orElse(null), pending.previous.worldPreview());
-            }
-            PacketDistributor.sendToServer(new RemoveShapePayload(payload.sessionId(), pending.slot, payload.revision()));
+            PacketDistributor.sendToServer(new SetShapeEnabledPayload(payload.sessionId(), pending.slot,
+                    payload.revision(), !pending.previous.enabled()));
         } else PacketDistributor.sendToServer(new ApplyShapePayload(payload.sessionId(), pending.slot, payload.revision(),
-                    pending.config, pending.worldPreview));
+                    pending.config));
     }
 
     public static void onResult(ApplyResultPayload payload) {
@@ -146,7 +137,6 @@ public final class QuickShapeAction {
                     ? new PresetSelection(mc.player.getUUID(), pending.slot, pending.stack.getItem(),
                             pending.presetName, pending.config.withRevision(payload.revision())) : null;
             ToolHud.confirmedChange();
-            if (pending.confirmationHint != null) ToolHud.feedback(pending.confirmationHint);
             pending = null;
             return;
         }

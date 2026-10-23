@@ -90,10 +90,32 @@ public final class EditSessions {
         ToolShapeData base = data != null ? data : ToolShapeData.fresh();
         long revision = current + 1;
         ShapeConfig accepted = request.config().withRevision(revision);
-        stack.set(ModComponents.TOOL_SHAPE.get(), base.withConfig(accepted, revision, request.worldPreview()));
+        stack.set(ModComponents.TOOL_SHAPE.get(), base.withConfig(accepted, revision));
         SESSIONS.put(player.getUUID(), session.withToolId(base.toolId()));
         PacketDistributor.sendToPlayer(player, new ApplyResultPayload(request.sessionId(), true, revision,
                 Component.translatable("message.excavation3d.applied")));
+    }
+
+    static void setEnabled(ServerPlayer player, SetShapeEnabledPayload request) {
+        Session session = openSession(player, request.sessionId(), request.expectedRevision());
+        if (session == null) return;
+        ItemStack stack = boundTool(player, session, request.sessionId(), request.slot(), request.expectedRevision());
+        if (stack == null) return;
+        ToolShapeData data = stack.get(ModComponents.TOOL_SHAPE.get());
+        if (data == null || data.config().isEmpty()) {
+            reject(player, request.sessionId(), request.expectedRevision(), "no_shape");
+            return;
+        }
+        if (request.enabled() && ShapeGenerator.generate(data.config().get(), ServerConfig.limits())
+                instanceof ShapeGenerator.Invalid invalid) {
+            PacketDistributor.sendToPlayer(player, new ApplyResultPayload(request.sessionId(), false, data.revision(),
+                    Component.translatable("message.excavation3d.reject.invalid", ShapeTexts.issue(invalid.issues().getFirst()))));
+            return;
+        }
+        long revision = data.revision() + 1;
+        stack.set(ModComponents.TOOL_SHAPE.get(), data.withEnabled(request.enabled(), revision));
+        PacketDistributor.sendToPlayer(player, new ApplyResultPayload(request.sessionId(), true, revision,
+                Component.translatable(request.enabled() ? "message.excavation3d.enabled" : "message.excavation3d.paused")));
     }
 
     static void remove(ServerPlayer player, RemoveShapePayload request) {

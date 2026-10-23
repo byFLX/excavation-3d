@@ -182,7 +182,7 @@ public final class ExcavationService {
             return;
         }
         ToolShapeData data = tool.get(ModComponents.TOOL_SHAPE.get());
-        if (data == null) {
+        if (data == null || !data.enabled()) {
             // No shape: the tool mines exactly like vanilla (plan §2a), without any message.
             return;
         }
@@ -360,7 +360,7 @@ public final class ExcavationService {
         }
         ToolShapeData data = tool.get(ModComponents.TOOL_SHAPE.get());
         if (player.getInventory().selected != operation.slot || !tool.is(ModTags.SHAPE_TOOLS)
-                || data == null || !data.toolId().equals(operation.toolId)) {
+                || data == null || !data.enabled() || !data.toolId().equals(operation.toolId)) {
             return AbortReason.TOOL_CHANGED;
         }
         return null;

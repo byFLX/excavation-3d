@@ -139,7 +139,7 @@ class QuickMenuLogicTest {
             for (int page = 0; page < pages; page++) {
                 var layout = QuickMenuLogic.layout(320, 240, count, page);
                 for (int number = -1; number <= 9; number++) {
-                    assertEquals(number >= 1 && number <= layout.segments() ? page * 8 + number - 1 : -1,
+                    assertEquals(number >= 1 && number <= layout.segments() ? (number == 1 ? 0 : page * 7 + number - 1) : -1,
                             layout.numberSelection(number));
                 }
             }
@@ -159,22 +159,22 @@ class QuickMenuLogicTest {
         assertEquals(0, QuickMenuLogic.animationProgress(1000, 1000, 0));
     }
 
-    @Test void everyEntryIsReachableOnceAndPagesClampIncludingPartialLastPage() {
+    @Test void offIsPinnedOnEveryPageAndOtherEntriesAreReachableOnce() {
         for (int count = 1; count <= 66; count++) {
             boolean[] reached = new boolean[count];
             var first = QuickMenuLogic.layout(320, 240, count, -1);
             assertEquals(0, first.page());
-            assertEquals((count + 7) / 8, first.pages());
+            assertEquals(Math.max(1, (count - 1 + 6) / 7), first.pages());
             for (int page = 0; page < first.pages(); page++) {
                 var layout = QuickMenuLogic.layout(320, 240, count, page);
-                assertEquals(page * 8, layout.offset());
+                assertEquals(page * 7, layout.offset());
                 assertTrue(layout.segments() > 0 && layout.segments() <= 8);
                 for (int segment = 0; segment < layout.segments(); segment++) {
                     double a = layout.angle(segment);
                     int index = layout.highlighted(layout.centerX() + Math.cos(a) * layout.labelRadius(),
                             layout.centerY() + Math.sin(a) * layout.labelRadius());
-                    assertEquals(layout.offset() + segment, index);
-                    assertFalse(reached[index]);
+                    assertEquals(segment == 0 ? 0 : layout.offset() + segment, index);
+                    if (index != 0) assertFalse(reached[index]);
                     reached[index] = true;
                 }
             }
@@ -183,42 +183,12 @@ class QuickMenuLogicTest {
         }
         assertEquals(1, QuickMenuLogic.layout(320, 240, 8, 0).pages());
         assertEquals(2, QuickMenuLogic.layout(320, 240, 9, 0).pages());
-        assertEquals(2, QuickMenuLogic.layout(320, 240, 66, 100).segments());
+        assertEquals(3, QuickMenuLogic.layout(320, 240, 66, 100).segments());
     }
 
-    @Test void offIsActiveOnlyWithoutAShapeAndOtherEntriesMatchByValue() {
-        var off = new QuickMenuLogic.Entry(QuickMenuLogic.Kind.OFF, "");
-        var last = new QuickMenuLogic.Entry(QuickMenuLogic.Kind.LAST, "");
-        var preset = new QuickMenuLogic.Entry(QuickMenuLogic.Kind.PRESET, "Saved");
-        var shape = ShapeConfig.of(new ShapeParams.Cuboid(5, 3, 1));
-        var other = ShapeConfig.of(new ShapeParams.Cuboid(3, 3, 1));
-        assertTrue(QuickMenuLogic.isActive(off, null, null));
-        assertFalse(QuickMenuLogic.isActive(off, shape, null));
-        assertFalse(QuickMenuLogic.isActive(last, shape, shape));
-        for (var entry : List.of(preset)) {
-            assertTrue(QuickMenuLogic.isActive(entry, shape.withRevision(42), shape.withRevision(0)));
-            assertFalse(QuickMenuLogic.isActive(entry, shape, other));
-            assertFalse(QuickMenuLogic.isActive(entry, shape, shape.withTransform(new ShapeTransform(1, false))));
-            assertFalse(QuickMenuLogic.isActive(entry, null, shape));
-            assertFalse(QuickMenuLogic.isActive(entry, shape, null));
-            assertFalse(QuickMenuLogic.isActive(entry, null, null));
-        }
-    }
 
-    @Test void lastIsVisibleOnlyWhileOffAndDuplicatePresetsHaveOneAlphabeticalMarker() {
-        var shape = ShapeConfig.of(new ShapeParams.Cuboid(4, 4, 1));
-        var names = List.of("Test123", "alpha", "Alpha");
-        var menu = QuickMenuLogic.entries(names, true, true);
-        assertFalse(menu.stream().anyMatch(e -> e.kind() == QuickMenuLogic.Kind.LAST));
-        int selected = QuickMenuLogic.activeIndex(menu, shape.withRevision(17), n -> java.util.Optional.of(shape));
-        assertEquals(new QuickMenuLogic.Entry(QuickMenuLogic.Kind.PRESET, "Alpha"), menu.get(selected));
-        assertEquals(-1, QuickMenuLogic.activeIndex(menu, shape.withTransform(new ShapeTransform(1, false)),
-                n -> java.util.Optional.of(shape)));
-        var offMenu = QuickMenuLogic.entries(names, true, false);
-        assertEquals(QuickMenuLogic.Kind.LAST, offMenu.get(1).kind());
-        assertEquals(0, QuickMenuLogic.activeIndex(offMenu, null, n -> java.util.Optional.of(shape)));
-        assertEquals(-1, QuickMenuLogic.activeIndex(menu, shape, n -> java.util.Optional.empty()));
-    }
+
+
 
     @Test void labelsFitWithoutWrappingOrBreakingUnicodeAndHintsPreferCompactText() {
         java.util.function.ToIntFunction<String> width = s -> s.codePointCount(0, s.length()) * 6;
@@ -252,67 +222,66 @@ class QuickMenuLogicTest {
         }
     }
 
-    @Test void entriesStartWithOffThenOptionalLastThenAlphabeticalPresets() {
-        var presets = List.of("Zulu", "alpha", "Bravo", "Alpha");
-        for (boolean hasLast : new boolean[] {false, true}) {
-            var entries = QuickMenuLogic.entries(presets, hasLast);
-            assertEquals(QuickMenuLogic.Kind.OFF, entries.getFirst().kind());
-            if (hasLast) assertEquals(QuickMenuLogic.Kind.LAST, entries.get(1).kind());
-            assertEquals(List.of("Alpha", "alpha", "Bravo", "Zulu"), entries.stream()
-                    .filter(e -> e.kind() == QuickMenuLogic.Kind.PRESET).map(QuickMenuLogic.Entry::name).toList());
-            assertEquals(4 + (hasLast ? 2 : 1), entries.size());
+
+
+
+
+
+
+
+
+
+    @Test void wheelOrderIsOffThenBuiltInsThenFavoritesInSaveOrder() {
+        var names = List.of("Zulu", "Alpha", "Beta");
+        var entries = QuickMenuLogic.entries(names);
+        assertEquals(QuickMenuLogic.Kind.OFF, entries.getFirst().kind());
+        assertEquals(BuiltInShapes.ALL.stream().map(BuiltInShapes.Entry::id).toList(),
+                entries.subList(1, 5).stream().map(QuickMenuLogic.Entry::name).toList());
+        assertEquals(names, entries.subList(5, 8).stream().map(QuickMenuLogic.Entry::name).toList());
+        assertEquals(5, QuickMenuLogic.entries(List.of()).size());
+    }
+
+    @Test void firstSegmentOffersOnOnlyForAPausedStoredShape() {
+        assertFalse(QuickMenuLogic.firstSegmentOn(false, false));
+        assertFalse(QuickMenuLogic.firstSegmentOn(false, true));
+        assertFalse(QuickMenuLogic.firstSegmentOn(true, true));
+        assertTrue(QuickMenuLogic.firstSegmentOn(true, false));
+    }
+
+    @Test void activeDotIsOffWhenPausedOtherwiseFirstMatchingShapeOrNone() {
+        var shape = ShapeConfig.of(new ShapeParams.Cuboid(4, 4, 1));
+        var menu = QuickMenuLogic.entries(List.of("Zulu", "Alpha"));
+        java.util.function.Function<String, java.util.Optional<ShapeConfig>> lookup = n -> java.util.Optional.of(shape);
+        assertEquals(0, QuickMenuLogic.activeIndex(menu, null, true, lookup));
+        assertEquals(0, QuickMenuLogic.activeIndex(menu, shape, false, lookup));
+        assertEquals(5, QuickMenuLogic.activeIndex(menu, shape.withRevision(42), true, lookup));
+        assertEquals(-1, QuickMenuLogic.activeIndex(menu, shape.withTransform(new ShapeTransform(1, false)), true, lookup));
+        assertEquals(-1, QuickMenuLogic.activeIndex(menu, shape, true, n -> java.util.Optional.empty()));
+        var builtIn = BuiltInShapes.ALL.get(1).config();
+        assertEquals(2, QuickMenuLogic.activeIndex(menu, builtIn, true, n -> java.util.Optional.of(builtIn)));
+    }
+
+    @Test void deletionNeedsTwoClicksOnTheSameFavoriteAndMovingAwayCancels() {
+        var state = new QuickMenuLogic.FavoriteDelete();
+        var a = new QuickMenuLogic.Entry(QuickMenuLogic.Kind.PRESET, "A");
+        var b = new QuickMenuLogic.Entry(QuickMenuLogic.Kind.PRESET, "B");
+        assertFalse(state.rightClick(a));
+        state.hover(a);
+        assertEquals("A", state.pending());
+        assertTrue(state.rightClick(a));
+        assertNull(state.pending());
+        assertFalse(state.rightClick(a));
+        state.hover(b);
+        assertNull(state.pending());
+        assertFalse(state.rightClick(a));
+        state.hover(null);
+        assertFalse(state.rightClick(a));
+        assertFalse(state.rightClick(b));
+        assertTrue(state.rightClick(b));
+        for (var entry : QuickMenuLogic.entries(List.of()).subList(0, 5)) {
+            assertFalse(state.rightClick(entry));
+            assertFalse(state.rightClick(entry));
+            assertNull(state.pending());
         }
-        assertEquals(List.of("Zulu", "alpha", "Bravo", "Alpha"), presets); // Input remains untouched.
-    }
-
-    @Test void noPresetsAddsADisabledHelpSectorAfterOffAndOptionalLast() {
-        assertEquals(List.of(QuickMenuLogic.Kind.OFF, QuickMenuLogic.Kind.EMPTY),
-                QuickMenuLogic.entries(List.of(), false).stream().map(QuickMenuLogic.Entry::kind).toList());
-        assertEquals(List.of(QuickMenuLogic.Kind.OFF, QuickMenuLogic.Kind.LAST, QuickMenuLogic.Kind.EMPTY),
-                QuickMenuLogic.entries(List.of(), true).stream().map(QuickMenuLogic.Entry::kind).toList());
-        assertFalse(QuickMenuLogic.isActive(new QuickMenuLogic.Entry(QuickMenuLogic.Kind.EMPTY, ""), null, null));
-    }
-
-    @Test void playersNeverShareTheirLastShape() {
-        var memory = new QuickMenuLogic.LastShape<String>();
-        UUID a = UUID.randomUUID(), b = UUID.randomUUID();
-        memory.remember(a, "A"); memory.remember(b, "B"); memory.remember(a, null);
-        assertEquals("A", memory.find(a).orElseThrow());
-        assertEquals("B", memory.find(b).orElseThrow());
-        memory.remember(a, "New");
-        assertEquals("New", memory.find(a).orElseThrow());
-        assertTrue(memory.find(UUID.randomUUID()).isEmpty());
-    }
-
-    @Test void onlyTheMatchingSuccessfulRemovalRemembersEvenAfterItsScreenWasClosed() {
-        var memory = new QuickMenuLogic.LastShape<String>();
-        UUID a = UUID.randomUUID(), b = UUID.randomUUID();
-        memory.expectRemoval(1, a, "A");
-        memory.expectRemoval(2, b, "B");
-        memory.onResult(99, true);
-        assertTrue(memory.find(a).isEmpty());
-        memory.onResult(1, false);
-        memory.onResult(1, true); // Rejected requests cannot be accepted a second time.
-        assertTrue(memory.find(a).isEmpty());
-        memory.onResult(2, true);
-        assertEquals("B", memory.find(b).orElseThrow());
-        memory.expectRemoval(3, b, null); // Off again on an already empty tool keeps the old value.
-        memory.onResult(3, true);
-        assertEquals("B", memory.find(b).orElseThrow());
-        memory.expectRemoval(4, a, "Old connection");
-        memory.clearPending();
-        memory.onResult(4, true);
-        assertTrue(memory.find(a).isEmpty());
-        assertEquals("B", memory.find(b).orElseThrow());
-    }
-
-    @Test void unansweredRemovalBookkeepingIsBounded() {
-        var memory = new QuickMenuLogic.LastShape<Integer>();
-        UUID player = UUID.randomUUID();
-        for (int session = 1; session <= 65; session++) memory.expectRemoval(session, player, session);
-        memory.onResult(1, true);
-        assertTrue(memory.find(player).isEmpty());
-        memory.onResult(65, true);
-        assertEquals(65, memory.find(player).orElseThrow());
     }
 }

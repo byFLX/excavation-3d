@@ -41,7 +41,7 @@ class ShapeCodecsTest {
 
     @Test
     void componentSurvivesPersistence() {
-        ToolShapeData data = new ToolShapeData(TOOL, 5L, Optional.of(custom()), true);
+        ToolShapeData data = new ToolShapeData(TOOL, 5L, Optional.of(custom()), false);
         ToolShapeData restored = jsonRoundTrip(data);
         assertEquals(data, restored);
         assertEquals(5L, restored.config().orElseThrow().revision());
@@ -50,8 +50,9 @@ class ShapeCodecsTest {
     @Test
     void componentSurvivesNetworkSync() {
         for (ToolShapeData data : new ToolShapeData[] {
-                new ToolShapeData(TOOL, 5L, Optional.of(custom()), true),
+                new ToolShapeData(TOOL, 5L, Optional.of(custom()), false),
                 new ToolShapeData(TOOL, 1L, Optional.of(ShapeConfig.of(new ShapeParams.Plus(5, 5, 2, 1))), false),
+                new ToolShapeData(TOOL, 5L, Optional.of(custom()), false, false),
                 ToolShapeData.fresh()}) {
             FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
             ToolShapeData.STREAM_CODEC.encode(buf, data);
@@ -60,12 +61,29 @@ class ShapeCodecsTest {
         }
     }
 
+    @Test void oldStacksDefaultToEnabledAndPreviewIsReadOnlyCompatibilityData() {
+        var data = new ToolShapeData(TOOL, 5L, Optional.of(custom()), false);
+        JsonObject old = ToolShapeData.CODEC.encodeStart(JsonOps.INSTANCE, data).getOrThrow().getAsJsonObject();
+        old.remove("enabled");
+        old.addProperty("world_preview", true);
+        var decoded = ToolShapeData.CODEC.parse(JsonOps.INSTANCE, old).getOrThrow();
+        assertTrue(decoded.enabled());
+        assertTrue(decoded.worldPreview());
+        var written = ToolShapeData.CODEC.encodeStart(JsonOps.INSTANCE, decoded).getOrThrow().getAsJsonObject();
+        assertFalse(written.has("world_preview"));
+        var paused = data.withEnabled(false, 6L);
+        assertEquals(paused, jsonRoundTrip(paused));
+        assertFalse(paused.enabled());
+        assertEquals(data.config().orElseThrow().withRevision(6L), paused.config().orElseThrow());
+        assertTrue(paused.withConfig(custom(), 7L).enabled());
+    }
+
     @Test
     void twoToolsStayIndependent() {
         ToolShapeData a = ToolShapeData.fresh();
         ToolShapeData b = ToolShapeData.fresh();
         assertFalse(a.toolId().equals(b.toolId()));
-        ToolShapeData configured = a.withConfig(ShapeConfig.of(new ShapeParams.Cuboid(3, 3, 1)), 1L, false);
+        ToolShapeData configured = a.withConfig(ShapeConfig.of(new ShapeParams.Cuboid(3, 3, 1)), 1L);
         assertEquals(a.toolId(), configured.toolId());
         assertTrue(b.config().isEmpty());
     }

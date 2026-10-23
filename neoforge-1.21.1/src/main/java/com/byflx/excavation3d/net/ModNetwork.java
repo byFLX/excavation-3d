@@ -18,8 +18,8 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
  * client-bound payload arrives, so a dedicated server never loads client classes.
  */
 public final class ModNetwork {
-    /** "3": shapes on normal tools, "Remove shape" request. */
-    private static final String VERSION = "3";
+    /** "4": enabled component state and pause/resume; world preview is client-only. */
+    private static final String VERSION = "4";
 
     private ModNetwork() {
     }
@@ -28,6 +28,7 @@ public final class ModNetwork {
         PayloadRegistrar registrar = event.registrar(VERSION);
         registrar.playToServer(BeginEditPayload.TYPE, BeginEditPayload.STREAM_CODEC, ModNetwork::onBeginEdit);
         registrar.playToServer(ApplyShapePayload.TYPE, ApplyShapePayload.STREAM_CODEC, ModNetwork::onApply);
+        registrar.playToServer(SetShapeEnabledPayload.TYPE, SetShapeEnabledPayload.STREAM_CODEC, ModNetwork::onSetEnabled);
         registrar.playToServer(RemoveShapePayload.TYPE, RemoveShapePayload.STREAM_CODEC, ModNetwork::onRemove);
         registrar.playToServer(BypassPayload.TYPE, BypassPayload.STREAM_CODEC, ModNetwork::onBypass);
         registrar.playToClient(EditSessionPayload.TYPE, EditSessionPayload.STREAM_CODEC,
@@ -51,6 +52,12 @@ public final class ModNetwork {
             if (context.player() instanceof ServerPlayer player) {
                 EditSessions.apply(player, payload);
             }
+        });
+    }
+
+    private static void onSetEnabled(SetShapeEnabledPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (context.player() instanceof ServerPlayer player) EditSessions.setEnabled(player, payload);
         });
     }
 
