@@ -40,9 +40,17 @@ public final class ToolHud {
                     WorldPreview.count(CellCategory.EXCLUDED),
                     WorldPreview.count(CellCategory.UNLOADED)).withStyle(ChatFormatting.GRAY);
         }
+        // Small, beside the hotbar's right end, so it stays out of the view and clear of hearts and item names.
         GuiGraphics graphics = event.getGuiGraphics();
-        int centre = graphics.guiWidth() / 2;
-        int y = graphics.guiHeight() - 72;
-        graphics.drawCenteredString(minecraft.font, line, centre, y, 0xFFFFFF);
+        float x = graphics.guiWidth() / 2F + HOTBAR_HALF_WIDTH + 6;
+        float y = graphics.guiHeight() - 14;
+        graphics.pose().pushPose();
+        graphics.pose().translate(x, y, 0);
+        graphics.pose().scale(SCALE, SCALE, 1);
+        graphics.drawString(minecraft.font, line, 0, 0, 0xFFFFFF);
+        graphics.pose().popPose();
     }
+
+    private static final int HOTBAR_HALF_WIDTH = 91;
+    private static final float SCALE = 0.75F;
 }
