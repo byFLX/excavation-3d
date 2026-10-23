@@ -5,6 +5,60 @@ import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 
 class PreviewGestureTest {
+    @Test void physicalReleaseEndsOwnershipOnMoveWithoutAReleaseOrDragEvent() {
+        for (int button : new int[] {0, 1}) {
+            for (boolean dragged : new boolean[] {false, true}) {
+                var gesture = new PreviewGesture();
+                gesture.press(button, 50, 60, true);
+                if (dragged) gesture.drag(button, 80, 90, 30, 30, true);
+                assertFalse(gesture.endIfReleased(true));
+                assertEquals(button, gesture.button());
+                assertTrue(gesture.endIfReleased(false));
+                assertEquals(-1, gesture.button());
+                assertFalse(gesture.drag(button, 200, 200, 120, 110, true).consumed());
+                assertEquals(PreviewGesture.Release.NONE, gesture.release(button, 200, 200, true, 1000));
+                assertFalse(gesture.endIfReleased(false));
+            }
+        }
+    }
+
+    @Test void staleOwnershipEndsEvenWhenTheDragEventHasNoMatchingButton() {
+        for (int eventButton : new int[] {-1, 1}) {
+            var gesture = new PreviewGesture();
+            gesture.press(0, 50, 60, true);
+            assertFalse(gesture.drag(eventButton, 200, 200, 150, 140, false).consumed());
+            assertEquals(-1, gesture.button());
+        }
+    }
+
+    @Test void outsideWidgetPressCancelsPreviewAndDoesNotJoinItsDoubleClick() {
+        var gesture = new PreviewGesture();
+        gesture.press(0, 50, 60, true);
+        assertEquals(PreviewGesture.Release.CLICK, gesture.release(0, 50, 60, true, 1000));
+        gesture.press(0, 50, 60, true); // Release event gets lost.
+        assertFalse(gesture.press(0, 200, 200, false));
+        assertEquals(-1, gesture.button());
+        assertFalse(gesture.drag(0, 200, 200, 150, 140, true).consumed());
+        assertEquals(PreviewGesture.Release.NONE, gesture.release(0, 200, 200, false, 1100));
+        gesture.press(0, 50, 60, true);
+        assertEquals(PreviewGesture.Release.CLICK, gesture.release(0, 50, 60, true, 1200));
+    }
+
+    @Test void idleButtonPollingPreservesDoubleClickButAnAbandonedGestureClearsIt() {
+        var gesture = new PreviewGesture();
+        gesture.press(0, 50, 60, true);
+        assertEquals(PreviewGesture.Release.CLICK, gesture.release(0, 50, 60, true, 1000));
+        assertFalse(gesture.endIfReleased(false));
+        gesture.press(0, 50, 60, true);
+        assertEquals(PreviewGesture.Release.RESET, gesture.release(0, 50, 60, true, 1100));
+        gesture.press(0, 50, 60, true);
+        assertEquals(PreviewGesture.Release.CLICK, gesture.release(0, 50, 60, true, 1200));
+        gesture.press(0, 50, 60, true);
+        assertTrue(gesture.endIfReleased(false));
+        gesture.press(0, 50, 60, true);
+        assertEquals(PreviewGesture.Release.CLICK, gesture.release(0, 50, 60, true, 1300));
+    }
+
     @Test void stationaryClickEndsOwnershipBeforeTheEditAndCannotRotateLater() {
         var gesture = new PreviewGesture();
         assertTrue(gesture.press(0, 50, 60, true));

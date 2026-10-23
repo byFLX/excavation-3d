@@ -11,9 +11,8 @@ import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 
 /**
- * The small tool hint above the hotbar (plan §2, §8): active shape or single-block mode, and the
- * world preview's "N blocks". Holding Shift adds the detailed counts with the reminder that
- * protection is decided by the server.
+ * One tool hint above the hotbar: active shape or single-block mode. Holding Shift replaces it
+ * with detailed world-preview counts and the reminder that protection is decided by the server.
  */
 public final class ToolHud {
     private ToolHud() {
@@ -33,23 +32,17 @@ public final class ToolHud {
         Component line = ClientState.bypassActive()
                 ? Component.translatable("tool.shapeexcavator.single_block").withStyle(ChatFormatting.YELLOW)
                 : ClientState.toolSummary(data);
+        // Details replace the tool line only while Shift is physically held.
+        if (WorldPreview.active() && Screen.hasShiftDown()) {
+            line = Component.translatable("hud.shapeexcavator.preview",
+                    WorldPreview.count(CellCategory.PRESENT),
+                    WorldPreview.count(CellCategory.AIR),
+                    WorldPreview.count(CellCategory.EXCLUDED),
+                    WorldPreview.count(CellCategory.UNLOADED)).withStyle(ChatFormatting.GRAY);
+        }
         GuiGraphics graphics = event.getGuiGraphics();
         int centre = graphics.guiWidth() / 2;
         int y = graphics.guiHeight() - 72;
         graphics.drawCenteredString(minecraft.font, line, centre, y, 0xFFFFFF);
-        if (WorldPreview.active()) {
-            Component mined = Component.translatable("hud.shapeexcavator.preview.short", WorldPreview.minedCount())
-                    .withStyle(ChatFormatting.GRAY);
-            graphics.drawCenteredString(minecraft.font, mined, centre, y - 10, 0xFFFFFF);
-            // Details only while Shift is physically held, whatever the single-block key is bound to.
-            if (Screen.hasShiftDown()) {
-                Component counts = Component.translatable("hud.shapeexcavator.preview",
-                        WorldPreview.count(CellCategory.PRESENT),
-                        WorldPreview.count(CellCategory.AIR),
-                        WorldPreview.count(CellCategory.EXCLUDED),
-                        WorldPreview.count(CellCategory.UNLOADED)).withStyle(ChatFormatting.GRAY);
-                graphics.drawCenteredString(minecraft.font, counts, centre, y - 20, 0xFFFFFF);
-            }
-        }
     }
 }

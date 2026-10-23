@@ -140,6 +140,7 @@ public final class ShapeEditorScreen extends Screen {
     private int cellSize;
 
     private final Map<AbstractWidget, Integer> scrolledWidgets = new LinkedHashMap<>();
+    private final List<Button> stepButtons = new ArrayList<>();
     /** Widgets on the preview; drawn after it, so the preview never covers them. */
     private final List<AbstractWidget> previewWidgets = new ArrayList<>();
     private final List<RowLabel> labels = new ArrayList<>();
@@ -185,6 +186,7 @@ public final class ShapeEditorScreen extends Screen {
         cancelPointer();
         previewGesture.reset();
         scrolledWidgets.clear();
+        stepButtons.clear();
         previewWidgets.clear();
         labels.clear();
         fieldBoxes.clear();
@@ -292,8 +294,7 @@ public final class ShapeEditorScreen extends Screen {
         boolean stacked = font.width(ShapeTexts.fieldName(field)) + 4 > minusX - leftX;
         labels.add(new RowLabel(ShapeTexts.fieldName(field), stacked ? y - 5 : y));
         if (stacked) y += 12;
-        scrolled(Button.builder(Component.literal("-"), b -> step(field, -1))
-                .bounds(minusX, y, STEP_WIDTH, 20).build(), y);
+        stepButton(field, -1, minusX, y);
         EditBox box = new EditBox(font, boxX + 1, y + 1, FIELD_WIDTH - 2, 18, ShapeTexts.fieldName(field));
         // One character over the parser's limit, so an over-long entry is shown as an error, not cut off.
         box.setMaxLength(NumericInput.MAX_LENGTH + 1);
@@ -301,9 +302,14 @@ public final class ShapeEditorScreen extends Screen {
         box.setResponder(text -> onFieldEdited(field, text));
         scrolled(box, y + 1);
         fieldBoxes.put(field, box);
-        scrolled(Button.builder(Component.literal("+"), b -> step(field, 1))
-                .bounds(plusX, y, STEP_WIDTH, 20).build(), y);
+        stepButton(field, 1, plusX, y);
         return y + ROW;
+    }
+
+    private void stepButton(String field, int delta, int x, int y) {
+        Button button = Button.builder(Component.literal(delta < 0 ? "-" : "+"), b -> step(field, delta))
+                .bounds(x, y, STEP_WIDTH, 20).build();
+        stepButtons.add(scrolled(button, y));
     }
 
     private int customRows(int y) {
@@ -355,7 +361,7 @@ public final class ShapeEditorScreen extends Screen {
                 Button.builder(Component.translatable("gui.shapeexcavator.resize.keep"), b -> cancelResize()));
         resizeConfirmButton = resize.get(0);
         resizeCancelButton = resize.get(1);
-        return y + (pendingResize != null ? ROW : 0) + 12;
+        return y + (pendingResize != null ? ROW : 0) + 2;
     }
 
     private List<Button> buttonRow(int y, Button.Builder... builders) {
@@ -513,7 +519,7 @@ public final class ShapeEditorScreen extends Screen {
             return;
         }
         CustomMaskDraft custom = draft.custom();
-        gridBaseY = resizeBaseY + (pendingResize != null ? ROW : 0) + 12;
+        gridBaseY = resizeBaseY + (pendingResize != null ? ROW : 0) + 2;
         cellSize = Mth.clamp(Math.min(leftW / custom.width(), 220 / custom.height()), 3, 12);
         contentHeight = gridBaseY + cellSize * custom.height() + 4 - contentTop;
     }
@@ -939,12 +945,7 @@ public final class ShapeEditorScreen extends Screen {
     @Override
     public void tick() {
         super.tick();
-        if (!minecraft.isWindowActive()
-                || (previewGesture.button() >= 0 && !buttonHeld(previewGesture.button()))
-                || (paintButton >= 0 && !buttonHeld(paintButton))) {
-            cancelPointer();
-            previewGesture.reset();
-        }
+        endStalePointer();
         // Only runs while this screen is shown; behind the discard dialog the wait pauses.
         int retry = handshake.tick();
         if (retry != 0) {
@@ -1044,6 +1045,25 @@ public final class ShapeEditorScreen extends Screen {
                 && GLFW.glfwGetMouseButton(minecraft.getWindow().getWindow(), button) == GLFW.GLFW_PRESS;
     }
 
+    private void endStalePointer() {
+        boolean previewEnded = previewGesture.endIfReleased(buttonHeld(previewGesture.button()));
+        if (!minecraft.isWindowActive() || previewEnded || (paintButton >= 0 && !buttonHeld(paintButton))) {
+            cancelPointer();
+            previewGesture.reset();
+        } else if (isDragging() && !buttonHeld(0)) {
+            // Screen's focused-widget drag must not survive a missing release either.
+            setDragging(false);
+        }
+    }
+
+    private void reconcilePointer(double mx, double my) {
+        endStalePointer();
+        if (previewGesture.button() >= 0 && !inPreview(mx, my)) {
+            cancelPointer();
+            previewGesture.reset();
+        }
+    }
+
     private void cancelPointer() {
         previewGesture.cancel();
         setDragging(false);
@@ -1124,6 +1144,17 @@ public final class ShapeEditorScreen extends Screen {
             }
             return true;
         }
+        // Dispatch every +/- press directly, before fields or widget double-click handling.
+        if (button == 0) {
+            for (Button stepper : stepButtons) {
+                if (stepper.active && stepper.visible && stepper.isMouseOver(mx, my)) {
+                    setFocused(stepper);
+                    stepper.playDownSound(minecraft.getSoundManager());
+                    stepper.onPress();
+                    return true;
+                }
+            }
+        }
         if (super.mouseClicked(mx, my, button)) {
             return true;
         }
@@ -1153,13 +1184,22 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     @Override
+    public void mouseMoved(double mx, double my) {
+        reconcilePointer(mx, my);
+        super.mouseMoved(mx, my);
+    }
+
+    @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
-        PreviewGesture.Motion motion = previewGesture.drag(button, mx, my, dx, dy, buttonHeld(button));
+        reconcilePointer(mx, my);
+        if (!buttonHeld(button)) return false;
+        PreviewGesture.Motion motion = previewGesture.drag(button, mx, my, dx, dy,
+                buttonHeld(previewGesture.button()));
         if (motion.consumed()) {
             if (button == 0) camera.drag(motion.dx(), motion.dy());
             return true;
         }
-        if (paintValue != null && button == paintButton && buttonHeld(button)) {
+        if (paintValue != null && button == paintButton) {
             Cell cell = gridCell(mx, my);
             if (cell != null) paint(cell);
             return true;
@@ -1286,7 +1326,6 @@ public final class ShapeEditorScreen extends Screen {
         int gy = gridBaseY - scroll;
         int w = custom.width();
         int h = custom.height();
-        graphics.drawString(font, Component.translatable("gui.shapeexcavator.grid_hint"), leftX, gy - 11, MUTED);
         graphics.fill(gx - 1, gy - 1, gx + w * cellSize, gy + h * cellSize, 0xFF101010);
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
@@ -1373,10 +1412,20 @@ public final class ShapeEditorScreen extends Screen {
                 graphics.drawString(font, firstLine(selected, maxWidth), leftX, summaryY + 11, color);
             }
         }
-        // Vanilla centres the label with the 17px box; keep the unchecked box just as visible.
+        // Put the explicit box above the vanilla sprite, even with queued GUI batches/depth writes.
+        graphics.flush();
+        graphics.pose().pushPose();
+        graphics.pose().translate(0.0F, 0.0F, 200.0F);
         int boxSize = Checkbox.getBoxSize(font);
-        graphics.renderOutline(worldPreviewCheckbox.getX(), worldPreviewCheckbox.getY(), boxSize, boxSize,
-                worldPreviewCheckbox.isHoveredOrFocused() ? 0xFFE0E0E0 : 0xFF8B96A6);
+        int boxX = worldPreviewCheckbox.getX(), boxY = worldPreviewCheckbox.getY();
+        boolean highlighted = worldPreviewCheckbox.isHoveredOrFocused();
+        if (!worldPreviewCheckbox.selected()) {
+            graphics.fill(boxX + 1, boxY + 1, boxX + boxSize - 1, boxY + boxSize - 1,
+                    highlighted ? 0xFF34445A : 0xFF161D27);
+        }
+        graphics.renderOutline(boxX, boxY, boxSize, boxSize, highlighted ? 0xFFFFFFFF : 0xFFB9C4D1);
+        graphics.flush();
+        graphics.pose().popPose();
         Component problem = applyProblem();
         Component message = problem != null ? problem : status;
         int color = currentProblem() != null ? ERROR : statusColor;

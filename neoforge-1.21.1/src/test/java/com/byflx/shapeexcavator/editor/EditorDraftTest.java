@@ -102,6 +102,23 @@ class EditorDraftTest {
     }
 
     @Test
+    void consecutiveStepperPressesAccumulateInBothDirections() {
+        EditorDraft draft = EditorDraft.defaults();
+        for (ShapeType type : List.of(ShapeType.CUBOID, ShapeType.CUSTOM)) {
+            draft.setType(type);
+            draft.setText(EditorDraft.WIDTH, "3");
+            for (int expected : new int[] {4, 5}) {
+                draft.setText(EditorDraft.WIDTH, draft.stepped(EditorDraft.WIDTH, 1, ShapeLimits.DEFAULT).orElseThrow());
+                assertEquals(Integer.toString(expected), draft.text(EditorDraft.WIDTH));
+            }
+            for (int expected : new int[] {4, 3}) {
+                draft.setText(EditorDraft.WIDTH, draft.stepped(EditorDraft.WIDTH, -1, ShapeLimits.DEFAULT).orElseThrow());
+                assertEquals(Integer.toString(expected), draft.text(EditorDraft.WIDTH));
+            }
+        }
+    }
+
+    @Test
     void surfaceAndLineTemplatesAreCuboidValues() {
         EditorDraft draft = EditorDraft.defaults();
         draft.setText(EditorDraft.DEPTH, "4");

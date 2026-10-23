@@ -49,13 +49,31 @@ class LabelPlacementTest {
                                         "every corner must be beyond its own axis end");
                             }
                             for (int j = 0; j < i; j++) if (placed.get(j).isPresent()) {
-                                assertFalse(r.intersects(placed.get(j).get().inflate(2)));
+                                assertFalse(r.intersects(placed.get(j).get().inflate(6)),
+                                        "axis labels must keep at least six GUI pixels apart");
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    @Test
+    void adjacentHeightAndDepthLabelsKeepAMinimumGapOrHideDepth() {
+        var labels = List.of(
+                new LabelPlacement.AxisLabel(new Label(25, 20, 50, 9), 25, 40),
+                new LabelPlacement.AxisLabel(new Label(75, 20, 50, 9), 75, 40));
+        Rect shape = new Rect(0, 30, 100, 60);
+        var placed = LabelPlacement.axisEnds(labels, shape, new Rect(0, 0, 110, 9));
+        Rect height = placed.get(0).orElseThrow();
+        Rect depth = placed.get(1).orElseThrow();
+        assertTrue(depth.x0() - height.x1() >= 6, "labels on the same row need a visible gap");
+        assertFalse(depth.intersects(height.inflate(6)));
+
+        var crowded = LabelPlacement.axisEnds(labels, shape, new Rect(0, 0, 100, 9));
+        assertTrue(crowded.get(0).isPresent());
+        assertTrue(crowded.get(1).isEmpty(), "hide depth when its own axis end has no separated spot");
     }
 
     @Test

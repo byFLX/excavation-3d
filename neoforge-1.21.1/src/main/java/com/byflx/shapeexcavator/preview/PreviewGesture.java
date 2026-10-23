@@ -15,6 +15,13 @@ public final class PreviewGesture {
 
     public int button() { return button; }
 
+    /** Reconcile ownership with the physical owning button, even without a matching drag event. */
+    public boolean endIfReleased(boolean held) {
+        if (button < 0 || held) return false;
+        reset();
+        return true;
+    }
+
     public boolean press(int pressedButton, double x, double y, boolean inside) {
         cancel();
         if (!inside || (pressedButton != 0 && pressedButton != 1)) { lastClick = -1; return false; }
@@ -25,8 +32,8 @@ public final class PreviewGesture {
     }
 
     public Motion drag(int eventButton, double x, double y, double dx, double dy, boolean held) {
+        if (endIfReleased(held)) return Motion.NONE;
         if (button < 0 || eventButton != button) return Motion.NONE;
-        if (!held) { cancel(); return Motion.NONE; }
         if (!dragged) {
             if (!moved(x, y)) return new Motion(true, 0, 0);
             dragged = true;

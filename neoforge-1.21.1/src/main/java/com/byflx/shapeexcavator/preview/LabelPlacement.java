@@ -46,6 +46,8 @@ public final class LabelPlacement {
     }
 
     private static final int GAP = 2;
+    /** GUI pixels between axis text rectangles, including the caller's shadow padding. */
+    public static final int AXIS_LABEL_GAP = 6;
 
     private LabelPlacement() {
     }
@@ -71,8 +73,8 @@ public final class LabelPlacement {
                 List<Integer> xs = new ArrayList<>(List.of(wantedX, panel.x0(), panel.x1() - label.width(),
                         shape.x0() - GAP - label.width(), shape.x1() + GAP));
                 for (Rect other : taken) {
-                    xs.add(other.x0() - GAP - label.width());
-                    xs.add(other.x1() + GAP);
+                    xs.add(other.x0() - AXIS_LABEL_GAP - label.width());
+                    xs.add(other.x1() + AXIS_LABEL_GAP);
                 }
                 for (int y = panel.y0(); y + label.height() <= panel.y1(); y++) {
                     for (int x : xs) {
@@ -81,7 +83,7 @@ public final class LabelPlacement {
                         double nearX = ux >= 0 ? candidate.x0() : candidate.x1();
                         double nearY = uy >= 0 ? candidate.y0() : candidate.y1();
                         if ((nearX - label.anchorX()) * ux + (nearY - label.anchorY()) * uy < GAP
-                                || !free(candidate, shape.inflate(GAP), panel, taken)) continue;
+                                || !free(candidate, shape.inflate(GAP), panel, taken, AXIS_LABEL_GAP)) continue;
                         double cost = Math.pow(x - wantedX, 2) + Math.pow(y - wantedY, 2);
                         if (cost < distance) { best = candidate; distance = cost; }
                     }
@@ -206,11 +208,15 @@ public final class LabelPlacement {
     }
 
     private static boolean free(Rect candidate, Rect blocked, Rect panel, List<Rect> taken) {
+        return free(candidate, blocked, panel, taken, GAP);
+    }
+
+    private static boolean free(Rect candidate, Rect blocked, Rect panel, List<Rect> taken, int labelGap) {
         if (candidate.intersects(blocked) || !candidate.inside(panel)) {
             return false;
         }
         for (Rect other : taken) {
-            if (candidate.intersects(other.inflate(GAP))) {
+            if (candidate.intersects(other.inflate(labelGap))) {
                 return false;
             }
         }
