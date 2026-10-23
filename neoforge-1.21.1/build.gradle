@@ -39,19 +39,19 @@ neoForge {
         gameTestServer {
             type = 'gameTestServer'
             gameDirectory = file('run-gametest')
-            systemProperty 'neoforge.enabledGameTestNamespaces', 'shapeexcavator'
+            systemProperty 'neoforge.enabledGameTestNamespaces', 'excavation3d'
         }
     }
 
     mods {
-        shapeexcavator {
+        excavation3d {
             sourceSet sourceSets.main
         }
     }
 
     unitTest {
         enable()
-        testedMod = mods.shapeexcavator
+        testedMod = mods.excavation3d
     }
 }
 

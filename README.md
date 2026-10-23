@@ -1,22 +1,22 @@
-# Shape Excavator
+# Excavation 3D
 
 Standalone Minecraft 1.21.1 / NeoForge 21.1.x mod: normal mining tools (pickaxes, shovels, axes, also from other mods) get an excavation shape that is configured in game, with numeric fields and a rotatable 3D block preview. There is no own tool item. It does not depend on Create.
 
-- Plan and acceptance criteria: [docs/SHAPE_EXCAVATOR_PLAN.md](docs/SHAPE_EXCAVATOR_PLAN.md)
+- Plan and acceptance criteria: [docs/EXCAVATION_3D_PLAN.md](docs/EXCAVATION_3D_PLAN.md)
 - Acceptance matrix (automated evidence and open in-game checks): [docs/ACCEPTANCE_MATRIX.md](docs/ACCEPTANCE_MATRIX.md)
 - Gradle project: `neoforge-1.21.1/` (`./gradlew test build`; world-level Game Tests: `./gradlew runGameTestServer`)
 - Status: stages 1–5 of the plan are implemented (geometric core, editor with 3D preview, custom layer editor and presets, tool data component with server-confirmed apply and world preview, server-side excavation), with the correction of plan §2a (shapes on normal tools, no own item). The in-game and multiplayer checks of stage 6 are listed as open in the acceptance matrix; they have not been run.
 
 ## Using the tools
 
-- Eligible tools: every item in the item tag `shapeexcavator:shape_tools`, which contains `#minecraft:pickaxes`, `#minecraft:shovels` and `#minecraft:axes` (`data/shapeexcavator/tags/item/shape_tools.json`). Tools of other mods in these tags are included; datapacks can add or remove tools.
+- Eligible tools: every item in the item tag `excavation3d:shape_tools`, which contains `#minecraft:pickaxes`, `#minecraft:shovels` and `#minecraft:axes` (`data/excavation3d/tags/item/shape_tools.json`). Tools of other mods in these tags are included; datapacks can add or remove tools.
 - Hold an eligible tool in the main hand and tap the editor key (default `V`) to open the editor on release. Hold it for 250 ms for the quick shape wheel at the crosshair (`QuickMenuLogic.HOLD_MS` controls the threshold). Move towards a named preset and release V to apply it; scroll for more entries or use 1–8 on the current page. The centre shows a cached isometric picture and block count of the hovered shape. Off removes the shape; Last shape restores the last shape whose removal the server confirmed, including its world-preview setting. This memory is client-side, per player, for this client process. Release in the centre or press Escape to cancel. Instructions appear above the wheel when there is space. The wheel blocks camera movement and never opens over another screen.
-- **Controls → Shape Excavator:** V and Shift keep their defaults. **Toggle shape on/off**, **Next preset**, **Previous preset**, and **Apply preset 1–5** are unbound by default. Toggle removes the held tool's shape; press again to restore Last shape (does nothing if no shape has been remembered). Presets use the wheel's alphabetical order, ignoring case with case-sensitive tie breaking. Next/Previous wrap; from Off or an unsaved shape they start at the first/last preset. Apply preset N selects the N-th saved preset; missing slots do nothing. Shortcuts use the same server session, validation and confirmation as the editor and wheel. Presses during an open screen or pending quick request are discarded.
+- **Controls → Excavation 3D:** V and Shift keep their defaults. **Toggle shape on/off**, **Next preset**, **Previous preset**, and **Apply preset 1–5** are unbound by default. Toggle removes the held tool's shape; press again to restore Last shape (does nothing if no shape has been remembered). Presets use the wheel's alphabetical order, ignoring case with case-sensitive tie breaking. Next/Previous wrap; from Off or an unsaved shape they start at the first/last preset. Apply preset N selects the N-th saved preset; missing slots do nothing. Shortcuts use the same server session, validation and confirmation as the editor and wheel. Presses during an open screen or pending quick request are discarded.
 - **Tool hint:** centred in the lower view above health/food/armor/XP, the vanilla item name and action bar, at 85% text size. It shows for 2.5 seconds and fades over 0.5 seconds when switching to an eligible tool, changing its shape (including confirmed Apply, wheel, shortcuts and Off), or starting/stopping single-block mode. Holding Shift keeps it visible and shows detailed preview counts when available; releasing Shift starts a fresh timeout. If the editor covers a confirmed change, the timeout starts when you return to the game. At sizes or health stacks with no free lower-centre space it is hidden.
 - A tool without a shape mines single blocks and shows "Off" in its hint. Opening and cancelling the editor does not change it. "Remove shape" in the editor's Presets menu deletes the shape, so the tool mines normally again. Configured tools show their shape type and size, plus the preset name when it matches a saved preset.
 - Mining the targeted block with a tool that carries a shape excavates the shape in survival mode, once the tool has really mined and harvested that start block. Suitability, tier, enchantments and durability come from the tool itself; extra blocks the tool is not correct for (e.g. stone with a shovel) are skipped and reported. In creative mode it mines single blocks. Hold the single-block key (default Shift) to mine one block only.
 - The shape stays on the tool through anvil repair and renaming, enchanting and the netherite upgrade, as far as vanilla keeps the item's components.
-- Server limits and work budgets: `serverconfig/shapeexcavator-server.toml` in the world folder. Personal presets: `config/shapeexcavator-presets.json`.
+- Server limits and work budgets: `serverconfig/excavation3d-server.toml` in the world folder. Personal presets: `config/excavation3d-presets.json`.
 
 ## Editor and preview controls
 
@@ -28,7 +28,7 @@ Standalone Minecraft 1.21.1 / NeoForge 21.1.x mod: normal mining tools (pickaxes
 - **Bottom:** the "World preview" checkbox, Cancel and Apply. Apply keeps the editor open and shows the server's answer. Enter with no text field focused applies and closes after successful confirmation; Enter in a field only leaves the field. Rejection or edits made while waiting keep the editor open. Cancel and Escape never change the tool and ask before discarding unsaved changes. The editor has an opaque background covering the HUD.
 - **World preview in the game:** with the checkbox on, looking at a block shows the outer outline of the blocks that will be mined, a light fill on them and the start block in yellow. Air, excluded and unloaded positions get neither an outline nor a fill. The temporary tool hint shows the active shape; hold Shift for the details (present, air, excluded, not loaded; protection is decided by the server). Holding the single-block key hides the drawing.
 
-## Code layout (`com.byflx.shapeexcavator`)
+## Code layout (`com.byflx.excavation3d`)
 
 | Package | Content | Side |
 |---|---|---|

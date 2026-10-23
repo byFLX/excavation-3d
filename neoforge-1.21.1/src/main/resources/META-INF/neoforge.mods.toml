@@ -3,20 +3,20 @@ loaderVersion="[4,)"
 license="MIT"
 
 [[mods]]
-modId="shapeexcavator"
+modId="excavation3d"
 version="${version}"
-displayName="Shape Excavator"
+displayName="Excavation 3D"
 authors="byFLX"
 description='''Excavation shapes for normal pickaxes, shovels and axes, configured in game with numeric fields and a rotatable 3D block preview.'''
 
-[[dependencies.shapeexcavator]]
+[[dependencies.excavation3d]]
 modId="neoforge"
 type="required"
 versionRange="[21.1.219,)"
 ordering="NONE"
 side="BOTH"
 
-[[dependencies.shapeexcavator]]
+[[dependencies.excavation3d]]
 modId="minecraft"
 type="required"
 versionRange="[1.21.1,1.22)"
