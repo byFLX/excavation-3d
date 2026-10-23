@@ -2,6 +2,7 @@ package com.byflx.shapeexcavator.editor;
 
 import com.byflx.shapeexcavator.shape.ShapeConfig;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -15,6 +16,9 @@ public final class QuickMenuLogic {
     /** Adjust this constant to change the tap/hold boundary. */
     public static final long HOLD_MS = 250L;
     public static final int PAGE_SIZE = 8;
+    public static final long OPEN_MS = 120L;
+    public static final long HOVER_MS = 80L;
+    public static final double SEGMENT_GAP = 0.018;
 
     public enum Gesture { NONE, TAP, HOLD }
 
@@ -40,33 +44,51 @@ public final class QuickMenuLogic {
     }
 
     /** Segment zero points up, with the other segments following clockwise. */
-    public record Layout(int centerX, int centerY, int radius, int deadZone, int count, int page) {
+    public record Layout(double centerX, double centerY, double radius, double deadZone, int count, int page) {
         public int pages() { return Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE); }
         public int offset() { return page * PAGE_SIZE; }
-        public int segments() { return Math.min(PAGE_SIZE, count - offset()); }
+        public int segments() { return Math.max(0, Math.min(PAGE_SIZE, count - offset())); }
         public double angle(int segment) { return -Math.PI / 2 + segment * Math.PI * 2 / segments(); }
         public double labelRadius() { return deadZone + (radius - deadZone) * 0.5; }
-        public int labelX(int segment) { return centerX + (int) Math.round(Math.cos(angle(segment)) * labelRadius()); }
-        public int labelY(int segment) { return centerY + (int) Math.round(Math.sin(angle(segment)) * labelRadius()); }
-        public int labelWidth(int segment) {
-            double neighbourSpace = 2 * labelRadius() * Math.sin(Math.PI / Math.max(2, segments())) - 10;
-            int x = Math.abs(labelX(segment) - centerX), y = labelY(segment) - centerY;
-            int farY = Math.max(Math.abs(y + 4), Math.abs(y + 13));
-            double circleEdge = Math.sqrt(Math.max(0, (radius - 2) * (radius - 2) - farY * farY));
-            int nearY = y + 4 <= 0 && y + 13 >= 0 ? 0 : Math.min(Math.abs(y + 4), Math.abs(y + 13));
-            double hubSpace = 100;
-            if (nearY < deadZone + 2) {
-                double hubEdge = Math.sqrt((deadZone + 2) * (deadZone + 2) - nearY * nearY);
-                hubSpace = 2 * (x - hubEdge - 1);
+        public double scale() { return radius / 88.0; }
+        public double labelX(int segment) { return centerX + Math.cos(angle(segment)) * labelRadius(); }
+        public double labelY(int segment) { return centerY + Math.sin(angle(segment)) * labelRadius(); }
+        /** Bounds of the small name below the icon, including a margin at each sector edge. */
+        public double labelWidth(int segment) {
+            double scale = scale();
+            for (int width = 100; width > 0; width--) {
+                boolean fits = true;
+                for (int side : new int[] {-1, 1}) {
+                    for (int y : new int[] {7, 15}) {
+                        double dx = labelX(segment) - centerX + side * width * scale / 2;
+                        double dy = labelY(segment) - centerY + y * scale;
+                        double distance = Math.hypot(dx, dy);
+                        double delta = Math.atan2(Math.sin(Math.atan2(dy, dx) - angle(segment)),
+                                Math.cos(Math.atan2(dy, dx) - angle(segment)));
+                        if (distance > radius - 3 * scale || distance < deadZone + 3 * scale
+                                || (segments() > 1 && Math.abs(delta) > Math.PI / segments() - SEGMENT_GAP - 0.035)) {
+                            fits = false;
+                        }
+                    }
+                }
+                // The nearest point of a horizontal rectangle can lie between its corners.
+                double nearX = Math.max(0, Math.abs(labelX(segment) - centerX) - width * scale / 2);
+                double top = labelY(segment) - centerY + 7 * scale;
+                double bottom = top + 8 * scale;
+                double nearY = top <= 0 && bottom >= 0 ? 0 : Math.min(Math.abs(top), Math.abs(bottom));
+                if (fits && Math.hypot(nearX, nearY) >= deadZone + 3 * scale) return width * scale;
             }
-            // Labels at the sides have less room than those at the top/bottom of the annulus.
-            return (int) Math.max(0, Math.min(hubSpace, Math.min(100,
-                    Math.min(neighbourSpace, 2 * (circleEdge - x - 1)))));
+            return 0;
         }
-        public int footerY() { return centerY + radius + 5; }
+        public double footerY() { return centerY + radius + 12 * scale(); }
+        /** One-based visible number keys; unused keys on the final page do nothing. */
+        public int numberSelection(int number) {
+            return number >= 1 && number <= segments() ? offset() + number - 1 : -1;
+        }
         public int highlighted(double mouseX, double mouseY) {
             double dx = mouseX - centerX, dy = mouseY - centerY;
-            if (Math.hypot(dx, dy) <= deadZone || segments() == 0) return -1;
+            if (!Double.isFinite(dx) || !Double.isFinite(dy)
+                    || Math.hypot(dx, dy) <= deadZone || segments() == 0) return -1;
             // Beyond the ring still selects by angle, like a weapon wheel.
             return offset() + segmentAtAngle(Math.atan2(dy, dx), segments());
         }
@@ -75,11 +97,18 @@ public final class QuickMenuLogic {
     public static Layout layout(int screenWidth, int screenHeight, int count, int requestedPage) {
         count = Math.max(0, count);
         int pages = Math.max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
-        // Minecraft caps the effective GUI scale at a minimum logical size of 320 x 240.
-        // Keep room above for shape details and below for three single-line hints.
-        int radius = Math.max(1, Math.min(124, Math.min(screenWidth / 2 - 8, screenHeight / 2 - 44)));
-        return new Layout(screenWidth / 2, screenHeight / 2, radius,
-                Math.max(1, (int) (radius * 0.43)), count, Math.clamp(requestedPage, 0, pages - 1));
+        // Reserve the local vignette, hover expansion, hint and page counter. Never move the crosshair anchor.
+        double scale = Math.max(0.01, Math.min(1,
+                Math.min((screenWidth / 2.0 - 4) / 102, (screenHeight / 2.0 - 4) / 116)));
+        return new Layout(screenWidth / 2.0, screenHeight / 2.0, 88 * scale,
+                28 * scale, count, Math.clamp(requestedPage, 0, pages - 1));
+    }
+
+    /** Linear elapsed progress; callers may apply easing after clamping. */
+    public static double animationProgress(long now, long start, long duration) {
+        if (now <= start) return 0;
+        if (duration <= 0) return 1;
+        return Math.clamp(((double) now - start) / duration, 0, 1);
     }
 
     /** Radians in screen coordinates (right = 0, down = pi/2), normalised over any turn. */
@@ -118,14 +147,16 @@ public final class QuickMenuLogic {
         return fitText(width.applyAsInt(full) <= maxWidth ? full : compact, maxWidth, width);
     }
 
-    public enum Kind { LAST, PRESET, OFF }
+    public enum Kind { OFF, LAST, PRESET, EMPTY }
     public record Entry(Kind kind, String name) { }
 
     public static List<Entry> entries(List<String> presets, boolean hasLast) {
         List<Entry> result = new ArrayList<>();
-        if (hasLast) result.add(new Entry(Kind.LAST, ""));
-        for (String name : presets) result.add(new Entry(Kind.PRESET, name));
         result.add(new Entry(Kind.OFF, ""));
+        if (hasLast) result.add(new Entry(Kind.LAST, ""));
+        presets.stream().sorted(String.CASE_INSENSITIVE_ORDER.thenComparing(Comparator.naturalOrder()))
+                .forEach(name -> result.add(new Entry(Kind.PRESET, name)));
+        if (presets.isEmpty()) result.add(new Entry(Kind.EMPTY, ""));
         return List.copyOf(result);
     }
 

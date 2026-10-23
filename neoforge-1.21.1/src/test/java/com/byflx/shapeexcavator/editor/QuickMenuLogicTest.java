@@ -18,12 +18,12 @@ class QuickMenuLogicTest {
                     int height = (int) Math.ceil((double) windowHeight / scale);
                     for (int count : new int[] {0, 1, 4, 8, 9, 66}) {
                         var layout = QuickMenuLogic.layout(width, height, count, 1000);
-                        assertEquals(width / 2, layout.centerX());
-                        assertEquals(height / 2, layout.centerY());
-                        assertTrue(layout.centerX() - layout.radius() - 5 >= 0);
-                        assertTrue(layout.centerX() + layout.radius() + 5 <= width);
-                        assertTrue(layout.centerY() - layout.radius() - 28 >= 0);
-                        assertTrue(layout.footerY() + 24 + 9 <= height);
+                        assertEquals(width / 2.0, layout.centerX());
+                        assertEquals(height / 2.0, layout.centerY());
+                        assertTrue(layout.centerX() - 102 * layout.scale() >= 0);
+                        assertTrue(layout.centerX() + 102 * layout.scale() <= width);
+                        assertTrue(layout.centerY() - 102 * layout.scale() >= 0);
+                        assertTrue(layout.footerY() + 19 * layout.scale() <= height);
                         assertTrue(layout.deadZone() > 0 && layout.deadZone() < layout.radius());
                         assertEquals(-1, layout.highlighted(layout.centerX(), layout.centerY()));
                     }
@@ -88,26 +88,72 @@ class QuickMenuLogicTest {
         }
         assertEquals(-1, layout.highlighted(layout.centerX() + layout.deadZone(), layout.centerY()));
         assertEquals(-1, QuickMenuLogic.layout(320, 240, 0, 0).highlighted(0, 0));
+        assertEquals(-1, layout.highlighted(Double.NaN, 0));
+        assertEquals(-1, layout.highlighted(0, Double.POSITIVE_INFINITY));
     }
 
-    @Test void labelBoundsStayInsideTheRingEvenAtTheSidesOnTheSmallestGui() {
-        for (int height : new int[] {240, 360, 480, 1080}) {
+    @Test void namesStayInsideTheirOwnSectorIncludingDiagonalBorders() {
+        for (int height : new int[] {120, 240, 360, 1080}) {
             for (int count = 1; count <= 8; count++) {
                 var layout = QuickMenuLogic.layout(427, height, count, 0);
                 for (int segment = 0; segment < count; segment++) {
-                    int halfWidth = layout.labelWidth(segment) / 2;
-                    assertTrue(halfWidth >= 12, "At least a short name fits");
-                    for (int x : new int[] {-halfWidth, halfWidth}) {
-                        for (int y : new int[] {4, 13}) {
-                            double distance = Math.hypot(layout.labelX(segment) + x - layout.centerX(),
-                                    layout.labelY(segment) + y - layout.centerY());
-                            assertTrue(distance < layout.radius() - 1);
-                            assertTrue(distance > layout.deadZone());
+                    double halfWidth = layout.labelWidth(segment) / 2;
+                    assertTrue(halfWidth >= 6 * layout.scale(), "A truncated label fits");
+                    for (int column = -4; column <= 4; column++) {
+                        for (int row = 7; row <= 15; row++) {
+                            double dx = layout.labelX(segment) + halfWidth * column / 4 - layout.centerX();
+                            double dy = layout.labelY(segment) + row * layout.scale() - layout.centerY();
+                            double distance = Math.hypot(dx, dy);
+                            assertTrue(distance < layout.radius() - layout.scale());
+                            assertTrue(distance > layout.deadZone() + layout.scale());
+                            assertEquals(segment, QuickMenuLogic.segmentAtAngle(Math.atan2(dy, dx), count));
                         }
                     }
                 }
             }
         }
+    }
+
+    @Test void ringUsesRequestedRadiiAndShrinksProportionallyWithoutMovingTheCrosshair() {
+        var normal = QuickMenuLogic.layout(640, 360, 8, 0);
+        assertEquals(88, normal.radius());
+        assertEquals(28, normal.deadZone());
+        for (int[] size : new int[][] {{320, 240}, {321, 241}, {160, 120}, {80, 60}}) {
+            var layout = QuickMenuLogic.layout(size[0], size[1], 8, 0);
+            assertEquals(size[0] / 2.0, layout.centerX());
+            assertEquals(size[1] / 2.0, layout.centerY());
+            assertEquals(28.0 / 88, layout.deadZone() / layout.radius(), 0.000001);
+            assertTrue(layout.radius() <= 88);
+            assertTrue(layout.centerX() - 102 * layout.scale() >= 0);
+            assertTrue(layout.centerY() - 102 * layout.scale() >= 0);
+            assertTrue(layout.footerY() + 19 * layout.scale() <= size[1]);
+        }
+    }
+
+    @Test void numberKeysMapOnlyToVisibleEntriesOnEachPage() {
+        for (int count = 0; count <= 66; count++) {
+            int pages = QuickMenuLogic.layout(320, 240, count, 0).pages();
+            for (int page = 0; page < pages; page++) {
+                var layout = QuickMenuLogic.layout(320, 240, count, page);
+                for (int number = -1; number <= 9; number++) {
+                    assertEquals(number >= 1 && number <= layout.segments() ? page * 8 + number - 1 : -1,
+                            layout.numberSelection(number));
+                }
+            }
+        }
+    }
+
+    @Test void animationProgressClampsBeforeAndAfterItsDuration() {
+        for (long duration : new long[] {QuickMenuLogic.OPEN_MS, QuickMenuLogic.HOVER_MS}) {
+            assertEquals(0, QuickMenuLogic.animationProgress(900, 1000, duration));
+            assertEquals(0, QuickMenuLogic.animationProgress(1000, 1000, duration));
+            assertEquals(0.5, QuickMenuLogic.animationProgress(1000 + duration / 2, 1000, duration));
+            assertEquals(1, QuickMenuLogic.animationProgress(1000 + duration, 1000, duration));
+            assertEquals(1, QuickMenuLogic.animationProgress(Long.MAX_VALUE, 1000, duration));
+        }
+        assertEquals(1, QuickMenuLogic.animationProgress(1001, 1000, 0));
+        assertEquals(1, QuickMenuLogic.animationProgress(1001, 1000, -1));
+        assertEquals(0, QuickMenuLogic.animationProgress(1000, 1000, 0));
     }
 
     @Test void everyEntryIsReachableOnceAndPagesClampIncludingPartialLastPage() {
@@ -175,17 +221,45 @@ class QuickMenuLogicTest {
         }
     }
 
-    @Test void lastShapeIsFirstOffIsLastAndPlayersNeverShareTheirLastShape() {
+    @Test void truncationUsesPixelMeasurementsRatherThanCharacterCount() {
+        java.util.function.ToIntFunction<String> width = s -> s.codePoints()
+                .map(c -> c == 'W' ? 8 : c == '…' ? 5 : 2).sum();
+        assertEquals("W…", QuickMenuLogic.fitText("WWii", 13, width));
+        assertEquals("iiii", QuickMenuLogic.fitText("iiii", 8, width));
+        assertEquals("…", QuickMenuLogic.fitText("WWii", 12, width));
+        assertEquals("", QuickMenuLogic.fitText("WWii", 4, width));
+        for (int budget = 0; budget < 32; budget++) {
+            assertTrue(width.applyAsInt(QuickMenuLogic.fitText("WWiiWW", budget, width)) <= budget);
+        }
+    }
+
+    @Test void entriesStartWithOffThenOptionalLastThenAlphabeticalPresets() {
+        var presets = List.of("Zulu", "alpha", "Bravo", "Alpha");
+        for (boolean hasLast : new boolean[] {false, true}) {
+            var entries = QuickMenuLogic.entries(presets, hasLast);
+            assertEquals(QuickMenuLogic.Kind.OFF, entries.getFirst().kind());
+            if (hasLast) assertEquals(QuickMenuLogic.Kind.LAST, entries.get(1).kind());
+            assertEquals(List.of("Alpha", "alpha", "Bravo", "Zulu"), entries.stream()
+                    .filter(e -> e.kind() == QuickMenuLogic.Kind.PRESET).map(QuickMenuLogic.Entry::name).toList());
+            assertEquals(4 + (hasLast ? 2 : 1), entries.size());
+        }
+        assertEquals(List.of("Zulu", "alpha", "Bravo", "Alpha"), presets); // Input remains untouched.
+    }
+
+    @Test void noPresetsAddsADisabledHelpSectorAfterOffAndOptionalLast() {
+        assertEquals(List.of(QuickMenuLogic.Kind.OFF, QuickMenuLogic.Kind.EMPTY),
+                QuickMenuLogic.entries(List.of(), false).stream().map(QuickMenuLogic.Entry::kind).toList());
+        assertEquals(List.of(QuickMenuLogic.Kind.OFF, QuickMenuLogic.Kind.LAST, QuickMenuLogic.Kind.EMPTY),
+                QuickMenuLogic.entries(List.of(), true).stream().map(QuickMenuLogic.Entry::kind).toList());
+        assertFalse(QuickMenuLogic.isActive(new QuickMenuLogic.Entry(QuickMenuLogic.Kind.EMPTY, ""), null, null));
+    }
+
+    @Test void playersNeverShareTheirLastShape() {
         var memory = new QuickMenuLogic.LastShape<String>();
         UUID a = UUID.randomUUID(), b = UUID.randomUUID();
-        assertEquals(List.of(new QuickMenuLogic.Entry(QuickMenuLogic.Kind.OFF, "")), QuickMenuLogic.entries(List.of(), false));
         memory.remember(a, "A"); memory.remember(b, "B"); memory.remember(a, null);
         assertEquals("A", memory.find(a).orElseThrow());
         assertEquals("B", memory.find(b).orElseThrow());
-        var entries = QuickMenuLogic.entries(List.of("Saved one", "Saved two"), memory.find(a).isPresent());
-        assertEquals(QuickMenuLogic.Kind.LAST, entries.getFirst().kind());
-        assertEquals("Saved one", entries.get(1).name());
-        assertEquals(QuickMenuLogic.Kind.OFF, entries.getLast().kind());
         memory.remember(a, "New");
         assertEquals("New", memory.find(a).orElseThrow());
         assertTrue(memory.find(UUID.randomUUID()).isEmpty());

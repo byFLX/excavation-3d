@@ -11,6 +11,8 @@ import com.byflx.shapeexcavator.shape.ShapeConfig;
 import com.byflx.shapeexcavator.shape.ShapeGenerator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.List;
+import net.minecraft.ChatFormatting;
+import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.RenderType;
@@ -18,22 +20,24 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import org.joml.Matrix4f;
+import org.lwjgl.glfw.GLFW;
 
-/** A hold-to-select wheel, anchored to the crosshair. The centre cancels and scrolling pages. */
+/** Hold-to-select wheel. Hit testing stays at its final size throughout the opening animation. */
 public final class QuickShapeScreen extends Screen {
-    private static final int TEXT = 0xFFF1F5FC;
-    private static final int MUTED = 0xFFB1BED0;
-    private static final int GOLD = 0xFFF1C76B;
-    private static final int HIGHLIGHT = 0xFF9CDFFF;
+    private static final int TEXT = 0xFFF1F3F5;
+    private static final int MUTED = 0xFFA4ACB4;
+    private static final int ACCENT = 0xFFE0B020;
     private record WheelEntry(QuickMenuLogic.Entry entry, ShapeConfig config, Component name,
-            Component details, boolean active) { }
+            Component details, boolean active, boolean enabled) { }
 
     private final List<WheelEntry> entries;
     private final int slot;
     private final ItemStack tool;
     private final ClientState.RememberedShape last;
     private final boolean worldPreview;
-    private final boolean hasPresets;
+    private final double[] hover;
+    private long openedAt, lastFrame;
+    private boolean initialized, finished;
     private int page;
 
     public QuickShapeScreen(Player player) {
@@ -44,63 +48,100 @@ public final class QuickShapeScreen extends Screen {
         ToolShapeData data = tool.get(ModComponents.TOOL_SHAPE.get());
         worldPreview = data != null && data.worldPreview();
         ShapeConfig active = data == null ? null : data.config().orElse(null);
-        List<String> presets = PresetRepository.get().names();
-        hasPresets = !presets.isEmpty();
-        // Snapshot configs and generated summaries once; rendering never generates a shape or reads disk.
-        entries = QuickMenuLogic.entries(presets, last != null).stream().map(entry -> {
+        // Snapshot configs and generated summaries once; rendering never generates shapes or reads disk.
+        entries = QuickMenuLogic.entries(PresetRepository.get().names(), last != null).stream().map(entry -> {
             ShapeConfig config = switch (entry.kind()) {
-                case OFF -> null;
+                case OFF, EMPTY -> null;
                 case LAST -> last.config();
                 case PRESET -> PresetRepository.get().find(entry.name()).orElse(null);
             };
             Component name = switch (entry.kind()) {
                 case LAST -> Component.translatable("gui.shapeexcavator.quick.last");
                 case OFF -> Component.translatable("gui.shapeexcavator.quick.off");
+                case EMPTY -> Component.translatable("gui.shapeexcavator.quick.empty", ShapeExcavatorClient.editorKeyLabel());
                 case PRESET -> Component.literal(entry.name());
             };
-            Component details = Component.empty();
-            if (config != null) {
-                var result = ShapeGenerator.generate(config, ClientState.limits());
-                if (result instanceof ShapeGenerator.Valid valid) {
-                    var shape = valid.shape();
-                    details = Component.translatable("gui.shapeexcavator.quick.details",
-                            shape.width(), shape.height(), shape.depth(), shape.count());
-                } else details = Component.translatable("gui.shapeexcavator.quick.unavailable");
+            boolean enabled = entry.kind() == QuickMenuLogic.Kind.OFF;
+            Component details = switch (entry.kind()) {
+                case OFF -> Component.translatable("gui.shapeexcavator.quick.mine_normally");
+                case EMPTY -> Component.translatable("gui.shapeexcavator.quick.empty", ShapeExcavatorClient.editorKeyLabel());
+                default -> Component.translatable("gui.shapeexcavator.quick.unavailable");
+            };
+            if (config != null && ShapeGenerator.generate(config, ClientState.limits()) instanceof ShapeGenerator.Valid valid) {
+                var shape = valid.shape();
+                details = Component.translatable("gui.shapeexcavator.quick.details",
+                        shape.width(), shape.height(), shape.depth(), shape.count());
+                enabled = true;
             }
             return new WheelEntry(entry, config, name, details,
-                    QuickMenuLogic.isActive(entry, active, config));
+                    QuickMenuLogic.isActive(entry, active, config), enabled);
         }).toList();
+        hover = new double[entries.size()];
+    }
+
+    @Override protected void init() {
+        // setScreen releases the mouse before init, preventing camera movement while the wheel is open.
+        // GLFW's callback also updates MouseHandler's coordinates before release-to-select is polled.
+        GLFW.glfwSetCursorPos(minecraft.getWindow().getWindow(),
+                minecraft.getWindow().getScreenWidth() / 2.0, minecraft.getWindow().getScreenHeight() / 2.0);
+        if (!initialized) {
+            openedAt = lastFrame = Util.getMillis();
+            initialized = true;
+        }
     }
 
     @Override public boolean isPauseScreen() { return false; }
-
-    @Override public void onClose() {
-        ShapeExcavatorClient.cancelEditorGesture();
-        minecraft.setScreen(null);
-    }
+    @Override public void onClose() { finish(-1); }
 
     private QuickMenuLogic.Layout layout() { return QuickMenuLogic.layout(width, height, entries.size(), page); }
 
+    private boolean validTool() {
+        return minecraft.isWindowActive() && minecraft.player != null
+                && minecraft.player.getInventory().selected == slot && minecraft.player.getMainHandItem() == tool;
+    }
+
     @Override public void tick() {
-        if (!minecraft.isWindowActive() || minecraft.player == null || minecraft.player.getInventory().selected != slot
-                || minecraft.player.getMainHandItem() != tool) { onClose(); return; }
+        if (!validTool()) { onClose(); return; }
         if (!ShapeExcavatorClient.isEditorKeyDown()) {
             double mx = minecraft.mouseHandler.xpos() * width / minecraft.getWindow().getScreenWidth();
             double my = minecraft.mouseHandler.ypos() * height / minecraft.getWindow().getScreenHeight();
-            int selected = layout().highlighted(mx, my);
-            ShapeExcavatorClient.cancelEditorGesture();
-            minecraft.setScreen(null);
-            if (selected >= 0) choose(entries.get(selected));
+            finish(layout().highlighted(mx, my));
         }
     }
 
-    private void choose(WheelEntry selection) {
+    private void finish(int index) {
+        if (finished) return;
+        finished = true;
+        boolean canApply = validTool();
+        ShapeExcavatorClient.cancelEditorGesture();
+        minecraft.setScreen(null);
+        if (!canApply || index < 0 || index >= entries.size()) return;
+        WheelEntry selection = entries.get(index);
+        if (!selection.enabled()) return;
         if (selection.entry().kind() == QuickMenuLogic.Kind.OFF) {
             QuickShapeAction.start(null, false, selection.name());
-        } else if (selection.config() != null) {
+        } else {
             boolean preview = selection.entry().kind() == QuickMenuLogic.Kind.LAST ? last.worldPreview() : worldPreview;
             QuickShapeAction.start(selection.config(), preview, selection.name());
         }
+    }
+
+    @Override public boolean mouseClicked(double mx, double my, int button) {
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            finish(layout().highlighted(mx, my));
+            return true;
+        }
+        return super.mouseClicked(mx, my, button);
+    }
+
+    @Override public boolean keyPressed(int key, int scanCode, int modifiers) {
+        if (key == GLFW.GLFW_KEY_ESCAPE) { onClose(); return true; }
+        if (key >= GLFW.GLFW_KEY_1 && key <= GLFW.GLFW_KEY_8) {
+            int index = layout().numberSelection(key - GLFW.GLFW_KEY_1 + 1);
+            if (index >= 0 && entries.get(index).enabled()) finish(index);
+            return true;
+        }
+        return super.keyPressed(key, scanCode, modifiers);
     }
 
     @Override public boolean mouseScrolled(double mx, double my, double sx, double sy) {
@@ -108,113 +149,162 @@ public final class QuickShapeScreen extends Screen {
         return true;
     }
 
-    /** Keep the world visible: no vanilla menu blur, panorama or full-screen dark rectangle. */
+    /** No vanilla menu blur, panorama or full-screen dark rectangle. */
     @Override public void renderBackground(GuiGraphics g, int mx, int my, float partialTick) { }
 
     @Override public void render(GuiGraphics g, int mx, int my, float partialTick) {
         QuickMenuLogic.Layout l = layout();
         int selected = l.highlighted(mx, my);
-        // A faint local halo and translucent circular hub keep the world visible around the wheel.
-        arc(g, l, l.radius(), l.radius() + 5, 0, Math.PI * 2, 0x16050810);
-        arc(g, l, 0, l.deadZone() - 3, 0, Math.PI * 2, 0xCC101722);
-        arc(g, l, l.deadZone() - 4, l.deadZone() - 3, 0, Math.PI * 2,
-                selected < 0 ? MUTED : 0x80586A80);
+        long now = Util.getMillis();
+        double elapsed = QuickMenuLogic.animationProgress(now, lastFrame, QuickMenuLogic.HOVER_MS);
+        lastFrame = now;
+        for (int i = 0; i < hover.length; i++) {
+            hover[i] = Math.clamp(hover[i] + (i == selected && entries.get(i).enabled() ? elapsed : -elapsed), 0, 1);
+        }
+        double progress = QuickMenuLogic.animationProgress(now, openedAt, QuickMenuLogic.OPEN_MS);
+        double fade = 1 - Math.pow(1 - progress, 3);
+        float scale = (float) (0.92 + 0.08 * fade);
+        g.pose().pushPose();
+        g.pose().translate(l.centerX(), l.centerY(), 0);
+        g.pose().scale(scale, scale, 1);
+        g.pose().translate(-l.centerX(), -l.centerY(), 0);
+        // Each radial band shares vertices at its edge: a smooth local fade without stacked halos.
+        arc(g, l, 0, 28 * l.scale(), 0, Math.PI * 2, alpha(0x5006080A, fade), alpha(0x4006080A, fade));
+        arc(g, l, 28 * l.scale(), 88 * l.scale(), 0, Math.PI * 2, alpha(0x4006080A, fade), alpha(0x2806080A, fade));
+        arc(g, l, 88 * l.scale(), 102 * l.scale(), 0, Math.PI * 2, alpha(0x2806080A, fade), 0x0006080A);
+        arc(g, l, 0, l.deadZone() - 2 * l.scale(), 0, Math.PI * 2, alpha(0xD0101418, fade));
         for (int segment = 0; segment < l.segments(); segment++) {
             int index = l.offset() + segment;
-            WheelEntry entry = entries.get(index);
-            boolean hovered = index == selected;
+            double h = hover[index] * hover[index] * (3 - 2 * hover[index]);
             double half = Math.PI / l.segments();
-            double gap = l.segments() == 1 ? 0 : 0.018;
-            double start = l.angle(segment) - half + gap;
-            double end = l.angle(segment) + half - gap;
-            int outline = hovered ? HIGHLIGHT : entry.active() ? GOLD : 0x90586A80;
-            arc(g, l, l.deadZone(), l.radius(), start, end, outline);
-            arc(g, l, l.deadZone() + 1.5, l.radius() - 1.5, start + gap, end - gap,
-                    hovered ? 0xF23A617F : 0xD51A2635);
+            double gap = l.segments() == 1 ? 0 : QuickMenuLogic.SEGMENT_GAP;
+            double start = l.angle(segment) - half + gap, end = l.angle(segment) + half - gap;
+            double outer = l.radius() + 4 * l.scale() * h;
+            int outline = alpha(mix(0x70424A52, ACCENT, h), fade);
+            int fill = alpha(mix(0xB0101418, 0xD02C3239, h), fade);
+            sector(g, l, outer, start, end, outline, fill);
+            if (entries.get(index).active()) {
+                double r = outer - 3 * l.scale();
+                double x = l.centerX() + Math.cos(l.angle(segment)) * r;
+                double y = l.centerY() + Math.sin(l.angle(segment)) * r;
+                dot(g, x, y, 1.7 * l.scale(), alpha(ACCENT, fade));
+            }
         }
-        // Flush all sector geometry before text/icons so their rendering order is unambiguous.
         g.flush();
         for (int segment = 0; segment < l.segments(); segment++) {
             int index = l.offset() + segment;
             WheelEntry entry = entries.get(index);
-            int x = l.labelX(segment), y = l.labelY(segment);
-            int color = index == selected ? HIGHLIGHT : entry.active() ? GOLD : TEXT;
-            ShapeTypeIcons.draw(g, entry.config() == null ? null : entry.config().type(), x - 5, y - 11, 2, color);
-            if (entry.active()) g.fill(x + 9, y - 10, x + 12, y - 7, GOLD);
-            line(g, entry.name().getString(), x, y + 4, l.labelWidth(segment), color);
+            int color = alpha(entry.enabled() ? TEXT : MUTED, fade * (entry.enabled() ? 1 : 0.65));
+            g.pose().pushPose();
+            g.pose().translate(l.labelX(segment), l.labelY(segment), 0);
+            g.pose().scale((float) l.scale(), (float) l.scale(), 1);
+            switch (entry.entry().kind()) {
+                case OFF -> ShapeTypeIcons.drawOff(g, -7, -7, 2, color);
+                case LAST -> ShapeTypeIcons.drawLast(g, -7, -7, 2, color);
+                case EMPTY -> ShapeTypeIcons.drawSave(g, -7, -7, 2, color);
+                case PRESET -> ShapeTypeIcons.draw(g, entry.config() == null ? null : entry.config().type(), -5, -5, 2, color);
+            }
+            g.pose().popPose();
+            line(g, entry.name(), l.labelX(segment), l.labelY(segment) + 8 * l.scale(),
+                    l.labelWidth(segment), 0.65 * l.scale(), color);
         }
-        WheelEntry hovered = selected < 0 ? null : entries.get(selected);
-        renderHub(g, l, hovered);
-        int detailY = l.centerY() - l.radius() - 28;
-        Component heading = hovered == null ? title : hovered.name();
-        if (hovered != null && hovered.active()) {
-            heading = heading.copy().append(Component.translatable("gui.shapeexcavator.quick.active"));
-        }
-        line(g, heading.getString(), l.centerX(), detailY, width - 16, TEXT);
-        Component detail = hovered == null ? Component.translatable("gui.shapeexcavator.quick.aim") : hovered.details();
-        line(g, detail.getString(), l.centerX(), detailY + 12, width - 16, MUTED);
-        int footerY = l.footerY();
+        renderHub(g, l, selected < 0 ? null : entries.get(selected), fade);
+        g.pose().popPose();
+        line(g, Component.translatable("gui.shapeexcavator.quick.hint", ShapeExcavatorClient.editorKeyLabel()),
+                l.centerX(), l.footerY(), width - 8, 0.8 * l.scale(), alpha(TEXT, fade));
         if (l.pages() > 1) {
-            line(g, Component.translatable("gui.shapeexcavator.quick.page", l.page() + 1, l.pages()).getString(),
-                    l.centerX(), footerY, width - 16, MUTED);
-            footerY += 12;
+            line(g, Component.translatable("gui.shapeexcavator.quick.page", l.page() + 1, l.pages()),
+                    l.centerX(), l.footerY() + 12 * l.scale(), width - 8, 0.7 * l.scale(), alpha(MUTED, fade));
         }
-        String hint = QuickMenuLogic.fitHint(
-                Component.translatable("gui.shapeexcavator.quick.hint", ShapeExcavatorClient.editorKeyLabel()).getString(),
-                Component.translatable("gui.shapeexcavator.quick.hint.short", ShapeExcavatorClient.editorKeyLabel()).getString(),
-                width - 16, font::width);
-        line(g, hint, l.centerX(), footerY, width - 16, TEXT);
-        if (!hasPresets) {
-            line(g, Component.translatable("gui.shapeexcavator.quick.empty", ShapeExcavatorClient.editorKeyLabel()).getString(),
-                    l.centerX(), footerY + 12, width - 16, MUTED);
-        }
+        g.flush();
     }
 
-    private void renderHub(GuiGraphics g, QuickMenuLogic.Layout l, WheelEntry hovered) {
-        // Slightly smaller hub text preserves the whole instruction at the minimum effective GUI size.
-        float scale = 0.75F;
+    private void renderHub(GuiGraphics g, QuickMenuLogic.Layout l, WheelEntry hovered, double fade) {
+        Component name = hovered == null ? Component.translatable("gui.shapeexcavator.quick.cancel") : hovered.name();
+        Component details = hovered == null ? Component.empty() : hovered.details();
+        // Fit the full summary by scaling down to the hub's chord; keep it on exactly one line.
+        double available = 2 * l.deadZone() - 8 * l.scale();
+        double nameScale = 0.75 * l.scale();
+        double detailScale = Math.min(0.6 * l.scale(), available / Math.max(1, font.width(details)));
+        line(g, name.copy().withStyle(ChatFormatting.BOLD), l.centerX(),
+                l.centerY() - (hovered == null ? 3 : 10) * l.scale(), available, nameScale, alpha(TEXT, fade));
+        if (hovered != null) line(g, details, l.centerX(), l.centerY() + 3 * l.scale(),
+                available, detailScale, alpha(MUTED, fade));
+    }
+
+    private void line(GuiGraphics g, Component text, double x, double y, double maxWidth, double scale, int color) {
+        if (scale <= 0 || (color >>> 24) < 4) return; // Font treats near-zero alpha as opaque.
+        String fitted = QuickMenuLogic.fitText(text.getString(), (int) Math.floor(maxWidth / scale),
+                s -> font.width(Component.literal(s).withStyle(text.getStyle())));
+        Component label = Component.literal(fitted).withStyle(text.getStyle());
         g.pose().pushPose();
-        g.pose().translate(l.centerX(), l.centerY(), 0);
-        g.pose().scale(scale, scale, 1);
-        int available = (int) ((l.deadZone() * 2 - 14) / scale);
-        String name = hovered == null ? title.getString()
-                : hovered.entry().kind() == QuickMenuLogic.Kind.OFF
-                        ? Component.translatable("gui.shapeexcavator.quick.off.short").getString() : hovered.name().getString();
-        String instruction = hovered == null
-                ? Component.translatable("gui.shapeexcavator.quick.cancel").getString()
-                : Component.translatable("gui.shapeexcavator.quick.release", ShapeExcavatorClient.editorKeyLabel()).getString();
-        if (font.width(instruction) <= available) {
-            line(g, name, 0, -12, available, hovered != null && hovered.active() ? GOLD : TEXT);
-            line(g, instruction, 0, 5, available, MUTED);
-        } else {
-            line(g, name, 0, -19, available, hovered != null && hovered.active() ? GOLD : TEXT);
-            line(g, Component.translatable(hovered == null ? "gui.shapeexcavator.quick.release.short"
-                            : "gui.shapeexcavator.quick.release.key", ShapeExcavatorClient.editorKeyLabel()).getString(),
-                    0, -3, available, MUTED);
-            line(g, Component.translatable(hovered == null ? "gui.shapeexcavator.quick.cancel.short"
-                            : "gui.shapeexcavator.quick.apply").getString(), 0, 9, available, MUTED);
-        }
+        g.pose().translate(x, y, 0);
+        g.pose().scale((float) scale, (float) scale, 1);
+        g.pose().translate(-font.width(label) / 2.0, 0, 0);
+        g.drawString(font, label, 0, 0, color, false);
         g.pose().popPose();
     }
 
-    private void line(GuiGraphics g, String text, int centerX, int y, int maxWidth, int color) {
-        g.drawCenteredString(font, QuickMenuLogic.fitText(text, maxWidth, font::width), centerX, y, color);
+    private static int alpha(int color, double opacity) {
+        return ((int) Math.round((color >>> 24) * opacity) << 24) | (color & 0xFFFFFF);
     }
 
-    /** Tessellated annular sector, using the same GUI render type and winding as GuiGraphics.fill. */
-    private static void arc(GuiGraphics g, QuickMenuLogic.Layout l, double inner, double outer,
-            double start, double end, int color) {
+    private static int mix(int from, int to, double amount) {
+        int result = 0;
+        for (int shift = 0; shift <= 24; shift += 8) {
+            int a = (from >>> shift) & 255, b = (to >>> shift) & 255;
+            result |= (int) Math.round(a + (b - a) * amount) << shift;
+        }
+        return result;
+    }
+
+    private static void dot(GuiGraphics g, double x, double y, double radius, int color) {
+        var l = new QuickMenuLogic.Layout(x, y, radius, 0, 1, 0);
+        arc(g, l, 0, radius, 0, Math.PI * 2, color);
+    }
+
+    /** Shared angular vertices for every border/fill band: neither gaps nor alpha overlaps at seams. */
+    private static void sector(GuiGraphics g, QuickMenuLogic.Layout l, double outer,
+            double start, double end, int outline, int fill) {
         VertexConsumer vertices = g.bufferSource().getBuffer(RenderType.gui());
         Matrix4f matrix = g.pose().last().pose();
-        int steps = Math.max(1, (int) Math.ceil((end - start) * outer / 3));
+        int steps = Math.max(12, (int) Math.ceil((end - start) * outer / 1.5));
+        double border = l.scale();
         for (int step = 0; step < steps; step++) {
             double a = start + (end - start) * step / steps;
             double b = start + (end - start) * (step + 1) / steps;
-            vertex(vertices, matrix, l, inner, a, color);
-            vertex(vertices, matrix, l, inner, b, color);
-            vertex(vertices, matrix, l, outer, b, color);
-            vertex(vertices, matrix, l, outer, a, color);
+            quad(vertices, matrix, l, l.deadZone(), l.deadZone() + border, a, b, outline, outline);
+            quad(vertices, matrix, l, outer - border, outer, a, b, outline, outline);
+            int middle = l.segments() > 1 && (step == 0 || step == steps - 1) ? outline : fill;
+            quad(vertices, matrix, l, l.deadZone() + border, outer - border, a, b, middle, middle);
         }
+    }
+
+    private static void arc(GuiGraphics g, QuickMenuLogic.Layout l, double inner, double outer,
+            double start, double end, int color) {
+        arc(g, l, inner, outer, start, end, color, color);
+    }
+
+    /** Disjoint quads, at most 1.5 GUI pixels per arc edge, with optional radial alpha interpolation. */
+    private static void arc(GuiGraphics g, QuickMenuLogic.Layout l, double inner, double outer,
+            double start, double end, int innerColor, int outerColor) {
+        VertexConsumer vertices = g.bufferSource().getBuffer(RenderType.gui());
+        Matrix4f matrix = g.pose().last().pose();
+        // All vignette bands use the same mesh, including their shared circular boundaries.
+        int steps = Math.max(12, (int) Math.ceil((end - start) * Math.max(outer, 102 * l.scale()) / 1.5));
+        for (int step = 0; step < steps; step++) {
+            double a = start + (end - start) * step / steps;
+            double b = start + (end - start) * (step + 1) / steps;
+            quad(vertices, matrix, l, inner, outer, a, b, innerColor, outerColor);
+        }
+    }
+
+    private static void quad(VertexConsumer vertices, Matrix4f matrix, QuickMenuLogic.Layout l,
+            double inner, double outer, double a, double b, int innerColor, int outerColor) {
+        vertex(vertices, matrix, l, inner, a, innerColor);
+        vertex(vertices, matrix, l, inner, b, innerColor);
+        vertex(vertices, matrix, l, outer, b, outerColor);
+        vertex(vertices, matrix, l, outer, a, outerColor);
     }
 
     private static void vertex(VertexConsumer vertices, Matrix4f matrix, QuickMenuLogic.Layout l,

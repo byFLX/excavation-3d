@@ -12,12 +12,29 @@ final class ShapeTypeIcons {
             ShapeType.STAIR, new String[] {"#....", "##...", "###..", "####.", "#####"},
             ShapeType.CORRIDOR, new String[] {"...##", "..###", ".###.", "###..", "##..."},
             ShapeType.CUSTOM, new String[] {"#.#.#", ".#.#.", "#.#.#", ".#.#.", "#.#.#"});
-    private static final String[] OFF = {"#####", "#...#", "#.#.#", "#...#", "#####"};
+    private static final String[] OFF = {"......#", ".#####.", ".#..##.", ".#.#.#.", ".##..#.", ".#####.", "#......"};
+    private static final String[] LAST = {"..###..", ".#...#.", "#.....#", "#......", "#...#..", ".#..##.", "..#####"};
+    private static final String[] SAVE = {"#######", "#.#.#.#", "#.#.#.#", "#.....#", "#.###.#", "#.#.#.#", "#######"};
 
     static String[] pattern(ShapeType type) { return PATTERNS.get(type); }
 
     static void draw(GuiGraphics g, ShapeType type, int x, int y, int pixel, int color) {
-        String[] rows = type == null ? OFF : pattern(type);
+        drawPattern(g, type == null ? OFF : pattern(type), x, y, pixel, color);
+    }
+
+    static void drawOff(GuiGraphics g, int x, int y, int pixel, int color) {
+        drawPattern(g, OFF, x, y, pixel, color);
+    }
+
+    static void drawLast(GuiGraphics g, int x, int y, int pixel, int color) {
+        drawPattern(g, LAST, x, y, pixel, color);
+    }
+
+    static void drawSave(GuiGraphics g, int x, int y, int pixel, int color) {
+        drawPattern(g, SAVE, x, y, pixel, color);
+    }
+
+    private static void drawPattern(GuiGraphics g, String[] rows, int x, int y, int pixel, int color) {
         for (int row = 0; row < rows.length; row++) {
             for (int col = 0; col < rows[row].length(); col++) {
                 if (rows[row].charAt(col) == '#') {
