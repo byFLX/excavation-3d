@@ -10,6 +10,7 @@ import com.byflx.excavation3d.registry.ModComponents;
 import com.byflx.excavation3d.shape.ShapeConfig;
 import com.byflx.excavation3d.shape.ShapeGenerator;
 import com.byflx.excavation3d.preview.ShapeThumbnail;
+import com.byflx.excavation3d.text.ShapeTexts;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.List;
 import net.minecraft.ChatFormatting;
@@ -36,6 +37,8 @@ public final class QuickShapeScreen extends Screen {
     private final ItemStack tool;
     private final ClientState.RememberedShape last;
     private final boolean worldPreview;
+    private final Component currentType;
+    private final Component currentSize;
     private final double[] hover;
     private long openedAt, lastFrame;
     private boolean initialized, finished;
@@ -49,8 +52,14 @@ public final class QuickShapeScreen extends Screen {
         ToolShapeData data = tool.get(ModComponents.TOOL_SHAPE.get());
         worldPreview = data != null && data.worldPreview();
         ShapeConfig active = data == null ? null : data.config().orElse(null);
+        currentType = active == null ? Component.translatable("gui.excavation3d.quick.off") : ShapeTexts.typeName(active.type());
+        currentSize = active != null && ShapeGenerator.generate(active, ClientState.limits()) instanceof ShapeGenerator.Valid valid
+                ? Component.translatable("gui.excavation3d.quick.size", valid.shape().width(), valid.shape().height(), valid.shape().depth())
+                : Component.empty();
         // Snapshot configs and generated summaries once; rendering never generates shapes or reads disk.
-        entries = QuickMenuLogic.entries(PresetRepository.get().names(), last != null).stream().map(entry -> {
+        var menu = QuickMenuLogic.entries(PresetRepository.get().names(), last != null, active != null);
+        int activeIndex = QuickMenuLogic.activeIndex(menu, active, PresetRepository.get()::find);
+        entries = menu.stream().map(entry -> {
             ShapeConfig config = switch (entry.kind()) {
                 case OFF, EMPTY -> null;
                 case LAST -> last.config();
@@ -76,7 +85,7 @@ public final class QuickShapeScreen extends Screen {
                 enabled = true;
             }
             return new WheelEntry(entry, config, name, details, thumbnail,
-                    QuickMenuLogic.isActive(entry, active, config), enabled);
+                    activeIndex >= 0 && menu.get(activeIndex).equals(entry), enabled);
         }).toList();
         hover = new double[entries.size()];
     }
@@ -121,12 +130,12 @@ public final class QuickShapeScreen extends Screen {
         WheelEntry selection = entries.get(index);
         if (!selection.enabled()) return;
         if (selection.entry().kind() == QuickMenuLogic.Kind.OFF) {
-            QuickShapeAction.start(null, false, selection.name());
+            QuickShapeAction.start(null, false);
         } else {
             boolean preview = selection.entry().kind() == QuickMenuLogic.Kind.LAST ? last.worldPreview() : worldPreview;
             if (selection.entry().kind() == QuickMenuLogic.Kind.PRESET) {
                 QuickShapeAction.startPreset(selection.config(), preview, selection.entry().name());
-            } else QuickShapeAction.start(selection.config(), preview, selection.name());
+            } else QuickShapeAction.start(selection.config(), preview);
         }
     }
 
@@ -228,8 +237,12 @@ public final class QuickShapeScreen extends Screen {
         double s = l.scale();
         double cx = l.centerX(), cy = l.centerY();
         if (hovered == null) {
-            line(g, Component.translatable("gui.excavation3d.quick.cancel"), cx, cy - 4 * s,
-                    46 * s, 0.85 * s, alpha(TEXT, fade));
+            line(g, Component.translatable("gui.excavation3d.quick.current_label"), cx, cy - 18 * s,
+                    36 * s, 0.65 * s, alpha(MUTED, fade));
+            line(g, currentType, cx, cy - 6 * s, 48 * s, 0.65 * s, alpha(TEXT, fade));
+            line(g, currentSize, cx, cy + 6 * s, 46 * s, 0.65 * s, alpha(TEXT, fade));
+            line(g, Component.translatable("gui.excavation3d.quick.cancel"), cx, cy + 17 * s,
+                    30 * s, 0.55 * s, alpha(MUTED, fade));
             return;
         }
         if (hovered.entry().kind() == QuickMenuLogic.Kind.OFF) {

@@ -36,7 +36,7 @@ public final class Excavation3DClient {
     private static final String CATEGORY = "key.categories.excavation3d";
     private static KeyMapping openEditor;
     private static KeyMapping singleBlock;
-    private static KeyMapping toggleShape, nextPreset, previousPreset;
+    private static KeyMapping toggleShape, nextPreset, previousPreset, toggleWorldPreview;
     private static final KeyMapping[] presetSlots = new KeyMapping[5];
     private static boolean sentBypass;
     private static final QuickMenuLogic.Hold editorHold = new QuickMenuLogic.Hold();
@@ -78,6 +78,7 @@ public final class Excavation3DClient {
         toggleShape = registerUnbound(event, "toggle_shape");
         nextPreset = registerUnbound(event, "next_preset");
         previousPreset = registerUnbound(event, "previous_preset");
+        toggleWorldPreview = registerUnbound(event, "toggle_world_preview");
         for (int i = 0; i < presetSlots.length; i++) {
             presetSlots[i] = registerUnbound(event, "apply_preset_" + (i + 1));
         }
@@ -93,7 +94,7 @@ public final class Excavation3DClient {
     /** Drain every mapping even while blocked: clicks must never replay after a screen or request closes. */
     private static void shortcuts(Minecraft mc) {
         KeyMapping[] mappings = {toggleShape, nextPreset, previousPreset,
-                presetSlots[0], presetSlots[1], presetSlots[2], presetSlots[3], presetSlots[4]};
+                presetSlots[0], presetSlots[1], presetSlots[2], presetSlots[3], presetSlots[4], toggleWorldPreview};
         int selected = -1;
         for (int i = 0; i < mappings.length; i++) {
             if (mappings[i] == null) continue;
@@ -101,14 +102,17 @@ public final class Excavation3DClient {
         }
         if (selected < 0 || mc.screen != null || mc.player == null || QuickShapeAction.busy()
                 || !mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) return;
+        if (selected == mappings.length - 1) {
+            QuickShapeAction.toggleWorldPreview();
+            return;
+        }
         ToolShapeData data = ModTags.shapeOf(mc.player.getMainHandItem());
         ShapeConfig active = data == null ? null : data.config().orElse(null);
         if (selected == 0) {
             var last = ClientState.lastShape(mc.player.getUUID());
             switch (PresetShortcuts.toggle(active != null, last.isPresent())) {
-                case OFF -> QuickShapeAction.start(null, false, Component.translatable("gui.excavation3d.quick.off"));
-                case RESTORE -> QuickShapeAction.start(last.orElseThrow().config(), last.orElseThrow().worldPreview(),
-                        Component.translatable("gui.excavation3d.quick.last"));
+                case OFF -> QuickShapeAction.start(null, false);
+                case RESTORE -> QuickShapeAction.start(last.orElseThrow().config(), last.orElseThrow().worldPreview());
                 case NONE -> { }
             }
             return;

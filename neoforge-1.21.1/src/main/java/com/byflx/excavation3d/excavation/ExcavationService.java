@@ -35,6 +35,8 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import net.neoforged.bus.api.Event;
+import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
@@ -76,6 +78,44 @@ public final class ExcavationService {
         TOOL_CHANGED, TOOL_BROKEN, PLAYER_GONE, DIED, DIMENSION_CHANGED
     }
 
+    /** Immutable server-side snapshot; mined includes the confirmed start block. */
+    public record Result(int mined, Map<SkipReason, Integer> skippedReasons, AbortReason abortReason) {
+        public Result {
+            skippedReasons = Map.copyOf(skippedReasons);
+        }
+
+        /** Air is recorded in the reasons but does not count as a skipped block. */
+        public int skippedTotal() {
+            return skippedReasons.entrySet().stream()
+                    .filter(entry -> entry.getKey() != SkipReason.AIR)
+                    .mapToInt(Map.Entry::getValue)
+                    .sum();
+        }
+    }
+
+    /**
+     * Posted once by {@link #finish} on the server thread for a finished operation, including
+     * interruptions. Observers such as GameTests receive a snapshot without any client message
+     * or packet. Not cancellable; the operation has already finished.
+     */
+    public static final class FinishedEvent extends Event {
+        private final ServerPlayer player;
+        private final Result result;
+
+        public FinishedEvent(ServerPlayer player, Result result) {
+            this.player = player;
+            this.result = result;
+        }
+
+        public ServerPlayer getPlayer() {
+            return player;
+        }
+
+        public Result getResult() {
+            return result;
+        }
+    }
+
     private record ClickedFace(BlockPos pos, Direction face) {
     }
 
@@ -107,16 +147,6 @@ public final class ExcavationService {
 
         int remaining() {
             return targets.size() - next;
-        }
-
-        int skippedTotal() {
-            int total = 0;
-            for (Map.Entry<SkipReason, Integer> entry : skipped.entrySet()) {
-                if (entry.getKey() != SkipReason.AIR) {
-                    total += entry.getValue();
-                }
-            }
-            return total;
         }
     }
 
@@ -389,11 +419,15 @@ public final class ExcavationService {
             return;
         }
         operation.finished = true;
-        MutableComponent message = abort == null
-                ? Component.translatable("message.excavation3d.result", operation.mined, operation.skippedTotal())
-                : Component.translatable("message.excavation3d.aborted",
+        Result result = new Result(operation.mined, operation.skipped, abort);
+        NeoForge.EVENT_BUS.post(new FinishedEvent(operation.player, result));
+        // Normal completion is quiet, including skipped blocks. Only interruptions need feedback.
+        if (abort == null) {
+            return;
+        }
+        MutableComponent message = Component.translatable("message.excavation3d.aborted",
                         Component.translatable("abort.excavation3d." + abort.name().toLowerCase(Locale.ROOT)),
-                        operation.mined, operation.skippedTotal());
+                        result.mined(), result.skippedTotal());
         List<Component> reasons = new ArrayList<>();
         for (Map.Entry<SkipReason, Integer> entry : operation.skipped.entrySet()) {
             if (entry.getKey() != SkipReason.AIR) {

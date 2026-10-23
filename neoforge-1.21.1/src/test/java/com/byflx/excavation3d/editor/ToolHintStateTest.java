@@ -4,6 +4,35 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ToolHintStateTest {
+    @Test void feedbackReplacesTheHintAndUsesItsFadeEvenWhileShiftIsHeld() {
+        var hint = new ToolHintState();
+        update(hint, 0, "tool", "shape", false, true);
+        hint.showFeedback("No reply");
+        update(hint, 100, "tool", "shape", false, true);
+        assertEquals("No reply", hint.feedback(2600));
+        assertEquals(1, hint.opacity(2600));
+        assertEquals(0.5, hint.opacity(2850));
+        assertNull(hint.feedback(3100));
+        update(hint, 3200, "tool", "shape", false, false);
+        assertNull(hint.feedback(3200)); // A new timer must not revive an expired failure.
+        hint.confirmedChange();
+        update(hint, 4000, "tool", "shape", false, false);
+        assertNull(hint.feedback(4000));
+        assertEquals(1, hint.opacity(4000));
+    }
+
+    @Test void hiddenFeedbackWaitsForTheGameAndDoesNotFollowAnotherTool() {
+        var hint = new ToolHintState();
+        update(hint, 0, "tool", "shape", false, false);
+        hint.showFeedback("Preview off");
+        hint.update(4000, true, "tool", "shape", false, false, false);
+        hint.update(20000, true, "tool", "shape", false, false, true);
+        assertEquals("Preview off", hint.feedback(22500));
+        assertEquals(0.5, hint.opacity(22750));
+        update(hint, 23000, "other", "shape", false, false);
+        assertNull(hint.feedback(23000));
+    }
+
     private static void update(ToolHintState hint, long now, String tool, String shape, boolean bypass, boolean shift) {
         hint.update(now, tool != null, tool, shape, bypass, shift, true);
     }

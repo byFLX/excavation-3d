@@ -1,6 +1,7 @@
 package com.byflx.excavation3d.gametest;
 
 import com.byflx.excavation3d.Excavation3D;
+import com.byflx.excavation3d.excavation.ExcavationService;
 import com.mojang.authlib.GameProfile;
 import io.netty.channel.embedded.EmbeddedChannel;
 import java.util.HashMap;
@@ -41,6 +42,7 @@ import net.neoforged.neoforge.event.server.ServerStartedEvent;
  *       ({@link #EMPTY_TEMPLATE}) that is created in memory instead of a binary structure file.</li>
  *   <li>A stand-in for a protection mod cancels break events at positions a test protects.</li>
  *   <li>A drop counter records how often a position's drops (loot and experience) are handled.</li>
+ *   <li>A server-side completion listener records excavation results for each test player.</li>
  * </ul>
  */
 @EventBusSubscriber(modid = Excavation3D.MOD_ID)
@@ -71,6 +73,7 @@ public final class GameTestSupport {
             listening = true;
             NeoForge.EVENT_BUS.addListener(EventPriority.HIGHEST, GameTestSupport::onBreak);
             NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, true, GameTestSupport::onDrops);
+            NeoForge.EVENT_BUS.addListener(GameTestSupport::onExcavationFinished);
         }
     }
 
@@ -82,6 +85,13 @@ public final class GameTestSupport {
 
     private static void onDrops(BlockDropsEvent event) {
         DROP_COUNTS.computeIfPresent(event.getPos(), (pos, count) -> count + 1);
+    }
+
+    private static void onExcavationFinished(ExcavationService.FinishedEvent event) {
+        if (event.getPlayer() instanceof TestPlayer player) {
+            player.lastResult = event.getResult();
+            player.resultCount++;
+        }
     }
 
     /** Cancels every break at the absolute position, like a claim mod would. */
@@ -126,8 +136,10 @@ public final class GameTestSupport {
         player.server.getPlayerList().remove(player);
     }
 
-    /** Keeps the last action-bar message, which carries the excavation result. */
+    /** Keeps server-side results separately from messages so tests can assert silent completion. */
     static final class TestPlayer extends ServerPlayer {
+        ExcavationService.Result lastResult;
+        int resultCount;
         Component lastMessage;
 
         TestPlayer(MinecraftServer server, ServerLevel level, GameProfile profile, ClientInformation info) {

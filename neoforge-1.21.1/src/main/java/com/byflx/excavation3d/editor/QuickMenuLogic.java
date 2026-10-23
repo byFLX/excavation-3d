@@ -124,8 +124,19 @@ public final class QuickMenuLogic {
     /** Tool and preset revisions differ; only the shape's configuration determines the marker. */
     public static boolean isActive(Entry entry, ShapeConfig activeShape, ShapeConfig entryShape) {
         return entry.kind() == Kind.OFF ? activeShape == null
-                : activeShape != null && entryShape != null
+                : entry.kind() == Kind.PRESET && activeShape != null && entryShape != null
                         && activeShape.withRevision(0).equals(entryShape.withRevision(0));
+    }
+
+    /** Exactly one marker, using the entries' alphabetical order even for duplicate configs. */
+    public static int activeIndex(List<Entry> entries, ShapeConfig activeShape,
+            java.util.function.Function<String, Optional<ShapeConfig>> lookup) {
+        for (int i = 0; i < entries.size(); i++) {
+            Entry entry = entries.get(i);
+            ShapeConfig config = entry.kind() == Kind.PRESET ? lookup.apply(entry.name()).orElse(null) : null;
+            if (isActive(entry, activeShape, config)) return i;
+        }
+        return -1;
     }
 
     /** A single line, shortened at code-point boundaries with an ellipsis when needed. */
@@ -152,9 +163,13 @@ public final class QuickMenuLogic {
     public record Entry(Kind kind, String name) { }
 
     public static List<Entry> entries(List<String> presets, boolean hasLast) {
+        return entries(presets, hasLast, false);
+    }
+
+    public static List<Entry> entries(List<String> presets, boolean hasLast, boolean hasShape) {
         List<Entry> result = new ArrayList<>();
         result.add(new Entry(Kind.OFF, ""));
-        if (hasLast) result.add(new Entry(Kind.LAST, ""));
+        if (hasLast && !hasShape) result.add(new Entry(Kind.LAST, ""));
         PresetShortcuts.sorted(presets).stream()
                 .forEach(name -> result.add(new Entry(Kind.PRESET, name)));
         if (presets.isEmpty()) result.add(new Entry(Kind.EMPTY, ""));

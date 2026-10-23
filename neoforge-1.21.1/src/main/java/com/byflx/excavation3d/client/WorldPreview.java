@@ -4,6 +4,7 @@ import com.byflx.excavation3d.data.ToolShapeData;
 import com.byflx.excavation3d.preview.CellCategory;
 import com.byflx.excavation3d.preview.ContourEdges;
 import com.byflx.excavation3d.preview.PreviewFill;
+import com.byflx.excavation3d.preview.StableTarget;
 import com.byflx.excavation3d.registry.ModTags;
 import com.byflx.excavation3d.shape.Offset;
 import com.byflx.excavation3d.shape.Orientation;
@@ -63,6 +64,10 @@ public final class WorldPreview {
     private static ShapeLimits cachedLimits;
     private static ShapeGenerator.Result cachedResult;
     private static Target target;
+    private static final StableTarget<Target> stableTarget = new StableTarget<>();
+    private static ToolShapeData targetData;
+    private static ClientLevel targetLevel;
+    private static int targetSlot = -1;
     private static BlockPos origin;
     private static List<ContourEdges.Edge> contour = List.of();
     private static PreviewFill.Result fill = new PreviewFill.Result(List.of(), Optional.empty(), 0);
@@ -85,7 +90,7 @@ public final class WorldPreview {
     }
 
     static void clear() {
-        clearGeometry();
+        clearTarget();
         cachedConfig = null;
         cachedLimits = null;
         cachedResult = null;
@@ -99,6 +104,14 @@ public final class WorldPreview {
         fill = new PreviewFill.Result(List.of(), Optional.empty(), 0);
     }
 
+    private static void clearTarget() {
+        clearGeometry();
+        stableTarget.reset();
+        targetData = null;
+        targetLevel = null;
+        targetSlot = -1;
+    }
+
     /** Reclassifies once per client tick, so changed blocks show up without per-frame world scans. */
     static void tick(Minecraft minecraft) {
         update(minecraft, true);
@@ -107,26 +120,47 @@ public final class WorldPreview {
     /**
      * Recomputes the positions when the target or the shape changed, or always when
      * {@code reclassify} is set. The render path calls this every frame with {@code false}: the
-     * targeted block is picked per frame, so the preview follows it in the same frame instead of
-     * lagging up to a tick behind while looking around.
+     * targeted block is picked per frame. Nearby changes and temporary misses are held for three
+     * ticks, so crossing a block edge while moving cannot clear the drawing for a single frame.
      */
     private static void update(Minecraft minecraft, boolean reclassify) {
         Player player = minecraft.player;
         ClientLevel level = minecraft.level;
         if (player == null || level == null) {
-            clearGeometry();
+            clearTarget();
             return;
         }
         ItemStack tool = player.getMainHandItem();
         ToolShapeData data = ModTags.shapeOf(tool);
-        if (data == null || !data.worldPreview() || data.config().isEmpty()
-                || !(minecraft.hitResult instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) {
-            clearGeometry();
+        if (data == null || !data.worldPreview() || data.config().isEmpty()) {
+            clearTarget();
             return;
         }
         ShapeConfig config = data.config().get();
         ShapeLimits limits = ClientState.limits();
-        Target next = new Target(config, limits, hit.getBlockPos(), hit.getDirection(), player.getDirection());
+        if (!data.equals(targetData) || level != targetLevel || targetSlot != player.getInventory().selected
+                || (target != null && !target.limits().equals(limits))) {
+            clearTarget();
+            targetData = data;
+            targetLevel = level;
+            targetSlot = player.getInventory().selected;
+        }
+        Target candidate = minecraft.hitResult instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
+                && usableStart(level, player, hit.getBlockPos())
+                ? new Target(config, limits, hit.getBlockPos().immutable(), hit.getDirection(), player.getDirection()) : null;
+        Target previous = stableTarget.current();
+        // Never keep a mined/unloaded start block, a machine, or a target left behind out of reach.
+        if (previous != null && !usableStart(level, player, previous.origin())) {
+            stableTarget.reset();
+            previous = null;
+        }
+        boolean nearby = candidate == null || previous == null
+                || candidate.origin().distManhattan(previous.origin()) <= 2;
+        Target next = stableTarget.select(candidate, player.tickCount, nearby);
+        if (next == null) {
+            clearGeometry();
+            return;
+        }
         if (!reclassify && next.equals(target)) {
             return;
         }
@@ -142,10 +176,6 @@ public final class WorldPreview {
         }
         BlockPos start = next.origin();
         BlockState startState = level.getBlockState(start);
-        if (startState.hasBlockEntity()) {
-            // The server never starts an area from storage or machines; show nothing extra.
-            return;
-        }
         Orientation orientation = Orientation.orient(next.face(), next.facing(),
                 Orientation.Mode.forType(config.type()));
         float startProgress = startState.getDestroyProgress(player, level, start);
@@ -160,6 +190,15 @@ public final class WorldPreview {
         origin = start;
         contour = ContourEdges.of(PreviewFill.minedCells(cells));
         fill = PreviewFill.of(cells);
+    }
+
+    private static boolean usableStart(ClientLevel level, Player player, BlockPos pos) {
+        if (!level.isLoaded(pos) || level.isOutsideBuildHeight(pos) || !level.getWorldBorder().isWithinBounds(pos)
+                || player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos))
+                        > Math.pow(player.blockInteractionRange() + 1, 2)) return false;
+        BlockState state = level.getBlockState(pos);
+        return !state.isAir() && !state.hasBlockEntity() && !(state.getBlock() instanceof LiquidBlock)
+                && state.getDestroySpeed(level, pos) >= 0;
     }
 
     /** A client-side estimate of the server's checks; protection is unknown here and not guessed. */

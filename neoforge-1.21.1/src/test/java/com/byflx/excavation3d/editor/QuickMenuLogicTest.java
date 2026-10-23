@@ -194,7 +194,8 @@ class QuickMenuLogicTest {
         var other = ShapeConfig.of(new ShapeParams.Cuboid(3, 3, 1));
         assertTrue(QuickMenuLogic.isActive(off, null, null));
         assertFalse(QuickMenuLogic.isActive(off, shape, null));
-        for (var entry : List.of(last, preset)) {
+        assertFalse(QuickMenuLogic.isActive(last, shape, shape));
+        for (var entry : List.of(preset)) {
             assertTrue(QuickMenuLogic.isActive(entry, shape.withRevision(42), shape.withRevision(0)));
             assertFalse(QuickMenuLogic.isActive(entry, shape, other));
             assertFalse(QuickMenuLogic.isActive(entry, shape, shape.withTransform(new ShapeTransform(1, false))));
@@ -202,6 +203,21 @@ class QuickMenuLogicTest {
             assertFalse(QuickMenuLogic.isActive(entry, shape, null));
             assertFalse(QuickMenuLogic.isActive(entry, null, null));
         }
+    }
+
+    @Test void lastIsVisibleOnlyWhileOffAndDuplicatePresetsHaveOneAlphabeticalMarker() {
+        var shape = ShapeConfig.of(new ShapeParams.Cuboid(4, 4, 1));
+        var names = List.of("Test123", "alpha", "Alpha");
+        var menu = QuickMenuLogic.entries(names, true, true);
+        assertFalse(menu.stream().anyMatch(e -> e.kind() == QuickMenuLogic.Kind.LAST));
+        int selected = QuickMenuLogic.activeIndex(menu, shape.withRevision(17), n -> java.util.Optional.of(shape));
+        assertEquals(new QuickMenuLogic.Entry(QuickMenuLogic.Kind.PRESET, "Alpha"), menu.get(selected));
+        assertEquals(-1, QuickMenuLogic.activeIndex(menu, shape.withTransform(new ShapeTransform(1, false)),
+                n -> java.util.Optional.of(shape)));
+        var offMenu = QuickMenuLogic.entries(names, true, false);
+        assertEquals(QuickMenuLogic.Kind.LAST, offMenu.get(1).kind());
+        assertEquals(0, QuickMenuLogic.activeIndex(offMenu, null, n -> java.util.Optional.of(shape)));
+        assertEquals(-1, QuickMenuLogic.activeIndex(menu, shape, n -> java.util.Optional.empty()));
     }
 
     @Test void labelsFitWithoutWrappingOrBreakingUnicodeAndHintsPreferCompactText() {

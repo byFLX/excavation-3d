@@ -13,6 +13,7 @@ import com.byflx.excavation3d.shape.ShapeConfig;
 import com.byflx.excavation3d.shape.ShapeGenerator;
 import com.byflx.excavation3d.text.ShapeTexts;
 import java.util.UUID;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -29,18 +30,17 @@ public final class QuickShapeAction {
     private final ShapeConfig config;
     private final ToolShapeData previous;
     private final boolean worldPreview;
-    private final Component selectionName;
+    private Component confirmationHint;
     private final String presetName;
     private int replyTicks;
     private boolean submitted;
 
-    private QuickShapeAction(Minecraft mc, ShapeConfig config, boolean worldPreview, Component selectionName, String presetName) {
+    private QuickShapeAction(Minecraft mc, ShapeConfig config, boolean worldPreview, String presetName) {
         slot = mc.player.getInventory().selected;
         stack = mc.player.getMainHandItem();
         previous = stack.get(ModComponents.TOOL_SHAPE.get());
         this.config = config;
         this.worldPreview = worldPreview;
-        this.selectionName = selectionName.copy();
         this.presetName = presetName;
     }
 
@@ -59,19 +59,34 @@ public final class QuickShapeAction {
     }
 
     public static void startPreset(ShapeConfig config, boolean worldPreview, String name) {
-        start(config, worldPreview, Component.literal(name), name);
+        start(config, worldPreview, name);
+    }
+
+    /** Reapply the unchanged config with only the preview flag flipped, after server confirmation. */
+    public static void toggleWorldPreview() {
+        Minecraft mc = Minecraft.getInstance();
+        if (busy() || mc.screen != null || mc.player == null) return;
+        ToolShapeData data = ModTags.shapeOf(mc.player.getMainHandItem());
+        if (data == null || data.config().isEmpty()) return;
+        boolean enabled = !data.worldPreview();
+        start(data.config().get(), enabled, confirmedPresetName());
+        if (pending != null && !pending.submitted) {
+            pending.confirmationHint = Component.translatable(enabled
+                    ? "tool.excavation3d.world_preview.on" : "tool.excavation3d.world_preview.off")
+                    .withStyle(ChatFormatting.GRAY);
+        }
     }
 
     /** Null config means Off. No local item component is ever changed. */
-    public static void start(ShapeConfig config, boolean worldPreview, Component selectionName) {
-        start(config, worldPreview, selectionName, null);
+    public static void start(ShapeConfig config, boolean worldPreview) {
+        start(config, worldPreview, null);
     }
 
-    private static void start(ShapeConfig config, boolean worldPreview, Component selectionName, String presetName) {
+    private static void start(ShapeConfig config, boolean worldPreview, String presetName) {
         Minecraft mc = Minecraft.getInstance();
         if (busy() || mc.screen != null || mc.player == null || mc.getConnection() == null
                 || !mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) return;
-        pending = new QuickShapeAction(mc, config, worldPreview, selectionName, presetName);
+        pending = new QuickShapeAction(mc, config, worldPreview, presetName);
         PacketDistributor.sendToServer(new BeginEditPayload(pending.handshake.start(), pending.slot));
     }
 
@@ -88,7 +103,7 @@ public final class QuickShapeAction {
         if (retry != 0) PacketDistributor.sendToServer(new BeginEditPayload(retry, pending.slot));
         if (pending.handshake.state() == SessionHandshake.State.NO_REPLY
                 || (pending.submitted && ++pending.replyTicks >= 200)) {
-            finish(Component.translatable("gui.excavation3d.status.no_reply"));
+            finish(Component.translatable("gui.excavation3d.status.no_reply"), ChatFormatting.YELLOW);
         }
     }
 
@@ -131,18 +146,19 @@ public final class QuickShapeAction {
                     ? new PresetSelection(mc.player.getUUID(), pending.slot, pending.stack.getItem(),
                             pending.presetName, pending.config.withRevision(payload.revision())) : null;
             ToolHud.confirmedChange();
+            if (pending.confirmationHint != null) ToolHud.feedback(pending.confirmationHint);
+            pending = null;
+            return;
         }
-        finish(payload.accepted()
-                ? (pending.config == null ? Component.translatable("gui.excavation3d.quick.applied_off")
-                        : Component.translatable("gui.excavation3d.quick.applied", pending.selectionName))
-                : payload.message());
+        finish(payload.message());
     }
 
     private static void finish(Component message) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null) {
-            mc.player.displayClientMessage(message, true);
-        }
+        finish(message, ChatFormatting.RED);
+    }
+
+    private static void finish(Component message, ChatFormatting color) {
+        ToolHud.feedback(message.copy().withStyle(color));
         pending = null;
     }
 

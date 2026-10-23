@@ -3,19 +3,20 @@ package com.byflx.excavation3d.gametest;
 import com.byflx.excavation3d.Excavation3D;
 import com.byflx.excavation3d.data.ToolShapeData;
 import com.byflx.excavation3d.excavation.ExcavationService;
+import com.byflx.excavation3d.excavation.ExcavationService.Result;
+import com.byflx.excavation3d.excavation.ExcavationService.SkipReason;
 import com.byflx.excavation3d.gametest.GameTestSupport.TestPlayer;
 import com.byflx.excavation3d.registry.ModComponents;
 import com.byflx.excavation3d.registry.ModTags;
 import com.byflx.excavation3d.shape.ShapeConfig;
 import com.byflx.excavation3d.shape.ShapeParams;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.inventory.AnvilMenu;
@@ -78,7 +79,7 @@ public final class ExcavationGameTests {
             }
             expectItems(helper, Items.DIRT, 9);
             expectDamage(helper, player, 9);
-            expectMined(helper, player, 9);
+            expectResult(helper, player, 9, Map.of());
             finish(helper, player);
         });
     }
@@ -121,7 +122,7 @@ public final class ExcavationGameTests {
             }
             expectItems(helper, Items.DIRT, 8);
             expectDamage(helper, player, 8);
-            expectMined(helper, player, 8);
+            expectResult(helper, player, 8, Map.of(SkipReason.PROTECTED, 1));
             finish(helper, player);
         });
     }
@@ -145,7 +146,7 @@ public final class ExcavationGameTests {
                 }
             }
             expectItems(helper, Items.COBBLESTONE, 7);
-            expectMined(helper, player, 7);
+            expectResult(helper, player, 7, Map.of(SkipReason.BLOCK_ENTITY, 1, SkipReason.WRONG_TOOL, 1));
             finish(helper, player);
         });
     }
@@ -232,12 +233,12 @@ public final class ExcavationGameTests {
             }
             expectItems(helper, Items.COBBLESTONE, 9);
             expectDamage(helper, player, 9);
-            expectMined(helper, player, 9);
+            expectResult(helper, player, 9, Map.of());
             finish(helper, player);
         });
     }
 
-    /** Extra blocks the real tool is not correct for stay and are reported (plan §2a). */
+    /** Extra blocks the real tool is not correct for stay and appear in the server result. */
     @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
     public static void shovelShapeSkipsStoneAndReportsIt(GameTestHelper helper) {
         buildWall(helper, Blocks.DIRT);
@@ -259,8 +260,7 @@ public final class ExcavationGameTests {
             expectItems(helper, Items.DIRT, 7);
             expectItems(helper, Items.COBBLESTONE, 0);
             expectDamage(helper, player, 7);
-            expectMined(helper, player, 7);
-            expectWrongToolSkips(helper, player, 2);
+            expectResult(helper, player, 7, Map.of(SkipReason.WRONG_TOOL, 2));
             finish(helper, player);
         });
     }
@@ -281,7 +281,7 @@ public final class ExcavationGameTests {
             }
             expectItems(helper, Items.OAK_PLANKS, 9);
             expectDamage(helper, player, 9);
-            expectMined(helper, player, 9);
+            expectResult(helper, player, 9, Map.of());
             finish(helper, player);
         });
     }
@@ -418,40 +418,27 @@ public final class ExcavationGameTests {
         }
     }
 
-    /** The result message's mined count includes the start block. */
-    private static void expectMined(GameTestHelper helper, TestPlayer player, int expected) {
-        Object mined = resultArgs(helper, player)[0];
-        if (!Integer.valueOf(expected).equals(mined)) {
-            helper.fail("Expected " + expected + " mined in the result message, got " + mined);
+    /** Completion is observable once on the server, while the player receives no message. */
+    private static void expectResult(GameTestHelper helper, TestPlayer player, int mined,
+            Map<SkipReason, Integer> skippedReasons) {
+        Result result = player.lastResult;
+        if (result == null || player.resultCount != 1) {
+            helper.fail("Expected exactly one excavation result, got " + player.resultCount + ": " + result);
+            return;
         }
-    }
-
-    /** The result message counts the skips and names the wrong-tool reason with the same count. */
-    private static void expectWrongToolSkips(GameTestHelper helper, TestPlayer player, int expected) {
-        Object skipped = resultArgs(helper, player)[1];
-        if (!Integer.valueOf(expected).equals(skipped)) {
-            helper.fail("Expected " + expected + " skipped in the result message, got " + skipped);
+        if (result.abortReason() != null) {
+            helper.fail("Expected normal completion, got " + result.abortReason());
         }
-        for (Component sibling : player.lastMessage.getSiblings()) {
-            if (sibling.getContents() instanceof TranslatableContents reason
-                    && reason.getKey().equals("skip.excavation3d.wrong_tool")) {
-                if (!Integer.valueOf(expected).equals(reason.getArgs()[0])) {
-                    helper.fail("Expected " + expected + " wrong-tool skips, got " + reason.getArgs()[0]);
-                }
-                return;
-            }
+        if (result.mined() != mined) {
+            helper.fail("Expected " + mined + " mined (including the start block), got " + result.mined());
         }
-        helper.fail("Expected a wrong-tool reason in " + player.lastMessage);
-    }
-
-    private static Object[] resultArgs(GameTestHelper helper, TestPlayer player) {
-        Component message = player.lastMessage;
-        if (message == null || !(message.getContents() instanceof TranslatableContents contents)
-                || !contents.getKey().equals("message.excavation3d.result")) {
-            helper.fail("Expected an excavation result message, got " + message);
-            return new Object[0];
+        int skipped = skippedReasons.values().stream().mapToInt(Integer::intValue).sum();
+        if (result.skippedTotal() != skipped || !result.skippedReasons().equals(skippedReasons)) {
+            helper.fail("Expected " + skipped + " skipped with reasons " + skippedReasons + ", got " + result);
         }
-        return contents.getArgs();
+        if (player.lastMessage != null) {
+            helper.fail("Expected silent excavation completion, got " + player.lastMessage);
+        }
     }
 
     private static void expectShape(GameTestHelper helper, ItemStack stack, ToolShapeData expected) {

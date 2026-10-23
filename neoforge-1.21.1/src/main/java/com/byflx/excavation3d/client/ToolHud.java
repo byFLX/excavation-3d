@@ -24,6 +24,7 @@ public final class ToolHud {
     private ToolHud() { }
 
     public static void confirmedChange() { state.confirmedChange(); }
+    public static void feedback(Component message) { state.showFeedback(message.copy()); }
     static void reset() { state = new ToolHintState(); }
 
     static void tick(Minecraft mc) {
@@ -51,6 +52,7 @@ public final class ToolHud {
                     WorldPreview.count(CellCategory.EXCLUDED), WorldPreview.count(CellCategory.UNLOADED))
                     .withStyle(ChatFormatting.GRAY);
         }
+        if (state.feedback(Util.getMillis()) instanceof Component feedback) line = feedback;
         GuiGraphics g = event.getGuiGraphics();
         List<FormattedCharSequence> lines = mc.font.split(line, (int) ((g.guiWidth() - 16) / SCALE));
         float textHeight = lines.size() * mc.font.lineHeight * SCALE;
