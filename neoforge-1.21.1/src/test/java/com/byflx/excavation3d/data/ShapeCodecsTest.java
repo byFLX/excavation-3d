@@ -138,7 +138,7 @@ class ShapeCodecsTest {
 
         FriendlyByteBuf badRotation = new FriendlyByteBuf(Unpooled.buffer());
         ShapeCodecs.writeConfig(badRotation, ShapeConfig.of(new ShapeParams.Cuboid(1, 1, 1)));
-        badRotation.setByte(badRotation.writerIndex() - 2, 7);
+        badRotation.setByte(badRotation.writerIndex() - 3, 7);
         assertThrows(DecoderException.class, () -> ShapeCodecs.readConfig(badRotation, 0L));
     }
 
@@ -148,5 +148,23 @@ class ShapeCodecsTest {
         ShapeConfig config = custom();
         ShapeCodecs.writeConfig(buf, config);
         assertEquals(config.withRevision(4L), ShapeCodecs.readConfig(buf, 4L));
+    }
+    @Test void existingCustomCodecDataDefaultsToHitFaceAndBothModesRoundTrip() {
+        for (var mode : com.byflx.excavation3d.shape.Orientation.Mode.values()) {
+            ShapeMask mask = ((ShapeParams.Custom) custom().params()).mask();
+            ShapeConfig config = ShapeConfig.of(new ShapeParams.Custom(mask, mode), new ShapeTransform(1, true));
+            JsonObject json = ShapeCodecs.CONFIG_CODEC.encodeStart(JsonOps.INSTANCE, config).getOrThrow().getAsJsonObject();
+            assertEquals(config, ShapeCodecs.CONFIG_CODEC.parse(JsonOps.INSTANCE, json).getOrThrow());
+            FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+            try {
+                ShapeCodecs.writeConfig(buffer, config);
+                assertEquals(config, ShapeCodecs.readConfig(buffer, 0));
+                assertEquals(0, buffer.readableBytes());
+            } finally { buffer.release(); }
+            json.remove("player_horizontal");
+            var legacy = ShapeCodecs.CONFIG_CODEC.parse(JsonOps.INSTANCE, json).getOrThrow();
+            assertEquals(com.byflx.excavation3d.shape.Orientation.Mode.HIT_FACE, legacy.orientationMode());
+            assertEquals(mask, ((ShapeParams.Custom) legacy.params()).mask());
+        }
     }
 }

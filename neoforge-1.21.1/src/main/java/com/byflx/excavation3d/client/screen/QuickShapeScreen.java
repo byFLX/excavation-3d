@@ -255,15 +255,20 @@ public final class QuickShapeScreen extends Screen {
             g.pose().popPose();
             line(g, entry.name(), l.labelX(segment), l.labelY(segment) + 8 * l.scale(),
                     l.labelWidth(segment), 0.65 * l.scale(), color);
+            double shortcutRadius = l.radius() - 11 * l.scale();
+            line(g, Component.literal(Integer.toString(segment + 1)),
+                    l.centerX() + Math.cos(l.angle(segment)) * shortcutRadius,
+                    l.centerY() + Math.sin(l.angle(segment)) * shortcutRadius - 3 * l.scale(),
+                    10 * l.scale(), 0.6 * l.scale(), alpha(MUTED, fade));
         }
         renderHub(g, l, selected < 0 ? null : entries.get(selected), fade);
         g.pose().popPose();
         if (l.showInstructions()) line(g,
                 Component.translatable("gui.excavation3d.quick.hint", Excavation3DClient.editorKeyLabel()),
                 l.centerX(), l.instructionsY(), width - 8, 0.8 * l.scale(), alpha(TEXT, fade));
-        if (l.showInstructions() && l.pages() > 1) {
+        if (l.pages() > 1) {
             line(g, Component.translatable("gui.excavation3d.quick.page", l.page() + 1, l.pages()),
-                    l.centerX(), l.instructionsY() + 12 * l.scale(), width - 8, 0.7 * l.scale(), alpha(MUTED, fade));
+                    l.centerX(), Math.min(height - 10, l.instructionsY() + 12 * l.scale()), width - 8, 0.7 * l.scale(), alpha(MUTED, fade));
         }
         g.flush();
     }
@@ -302,8 +307,8 @@ public final class QuickShapeScreen extends Screen {
             return;
         }
         // Keep the name on the upper chord and the count on the lower chord of the inner circle.
-        line(g, hovered.name().copy().withStyle(ChatFormatting.BOLD), cx, cy - 21 * s,
-                30 * s, 0.85 * s, alpha(TEXT, fade));
+        fullName(g, hovered.name().copy().withStyle(ChatFormatting.BOLD), cx, cy - 24 * s, s,
+                alpha(TEXT, fade));
         if (hovered.thumbnail() != null) {
             VertexConsumer vertices = g.bufferSource().getBuffer(RenderType.gui());
             Matrix4f matrix = g.pose().last().pose();
@@ -320,6 +325,23 @@ public final class QuickShapeScreen extends Screen {
         double detailScale = hovered.thumbnail() == null ? 0.65 * s
                 : Math.min(0.65 * s, 32 * s / Math.max(1, font.width(detail)));
         line(g, detail, cx, cy + 14 * s, 32 * s, detailScale, alpha(MUTED, fade));
+    }
+
+    /** Fits the complete name in at most two lines; segment labels may still abbreviate. */
+    private void fullName(GuiGraphics g, Component name, double x, double y, double scale, int color) {
+        int wrapWidth = Math.max(40, (font.width(name) + 1) / 2);
+        var lines = font.split(name, wrapWidth);
+        while (lines.size() > 2) lines = font.split(name, ++wrapWidth);
+        int widest = lines.stream().mapToInt(font::width).max().orElse(1);
+        float textScale = (float) Math.min(0.7 * scale, 36 * scale / Math.max(1, widest));
+        g.pose().pushPose();
+        g.pose().translate(x, y, 0);
+        g.pose().scale(textScale, textScale, 1);
+        for (int i = 0; i < lines.size(); i++) {
+            g.drawString(font, lines.get(i), -font.width(lines.get(i)) / 2,
+                    i * font.lineHeight, color, false);
+        }
+        g.pose().popPose();
     }
 
     private void line(GuiGraphics g, Component text, double x, double y, double maxWidth, double scale, int color) {

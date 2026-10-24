@@ -18,7 +18,13 @@ import java.util.Objects;
  * plus the mask as {@code ceil(w*h*d/64)} words in {@link ShapeMask#toBitSet()} layout. Booleans are 0 or 1.
  */
 public record EncodedShape(int formatVersion, ShapeType type, List<Integer> values, List<Long> maskWords,
-        int rotation, boolean mirrored) {
+        int rotation, boolean mirrored, boolean playerHorizontal) {
+    /** Compatibility constructor for pre-orientation data and callers. */
+    public EncodedShape(int formatVersion, ShapeType type, List<Integer> values, List<Long> maskWords,
+            int rotation, boolean mirrored) {
+        this(formatVersion, type, values, maskWords, rotation, mirrored, false);
+    }
+
     public static final int MAX_VALUES = 6;
     public static final int MAX_MASK_WORDS = wordsFor(
             ShapeLimits.TECHNICAL_MAX_AXIS * ShapeLimits.TECHNICAL_MAX_AXIS * ShapeLimits.TECHNICAL_MAX_AXIS);
@@ -53,7 +59,8 @@ public record EncodedShape(int formatVersion, ShapeType type, List<Integer> valu
         };
         List<Long> words = config.params() instanceof ShapeParams.Custom custom ? words(custom.mask()) : List.of();
         ShapeTransform t = config.transform();
-        return new EncodedShape(config.formatVersion(), config.type(), values, words, t.rotation(), t.mirrored());
+        return new EncodedShape(config.formatVersion(), config.type(), values, words, t.rotation(), t.mirrored(),
+                config.params() instanceof ShapeParams.Custom c && c.orientation() == Orientation.Mode.PLAYER_HORIZONTAL);
     }
 
     public static int wordsFor(int cells) {
@@ -103,7 +110,8 @@ public record EncodedShape(int formatVersion, ShapeType type, List<Integer> valu
                 if (mask instanceof Error error) {
                     return error;
                 }
-                params = new ShapeParams.Custom((ShapeMask) mask);
+                params = new ShapeParams.Custom((ShapeMask) mask,
+                        playerHorizontal ? Orientation.Mode.PLAYER_HORIZONTAL : Orientation.Mode.HIT_FACE);
             }
             default -> throw new IllegalStateException("unreachable: " + type);
         }

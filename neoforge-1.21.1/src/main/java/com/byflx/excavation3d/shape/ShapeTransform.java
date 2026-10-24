@@ -40,6 +40,11 @@ public record ShapeTransform(int rotation, boolean mirrored) {
         return new ShapeTransform(rotation, !mirrored);
     }
 
+    /** This transform followed by a left/right flip in the displayed width/height plane. */
+    public ShapeTransform mirroredHorizontally() {
+        return new ShapeTransform((4 - rotation) % 4, !mirrored);
+    }
+
     public boolean isIdentity() {
         return rotation == 0 && !mirrored;
     }

@@ -139,7 +139,8 @@ class EditorDraftTest {
                 ShapeConfig.of(new ShapeParams.Custom(ShapeMask.full(2, 3, 2, new Cell(1, 2, 0)))));
         for (ShapeConfig config : configs) {
             EditorDraft draft = EditorDraft.fromConfig(config);
-            assertEquals(config, draft.evaluate(ShapeLimits.DEFAULT).config(), config.toString());
+            assertEquals(config.type() == ShapeType.CUSTOM ? config : config.withTransform(ShapeTransform.IDENTITY),
+                    draft.evaluate(ShapeLimits.DEFAULT).config(), config.toString());
         }
     }
 
@@ -148,6 +149,7 @@ class EditorDraftTest {
         EditorDraft draft = EditorDraft.defaults();
         draft.setText(EditorDraft.WIDTH, "3");
         draft.setText(EditorDraft.HEIGHT, "1");
+        assertTrue(draft.convertToCustom(ShapeLimits.DEFAULT));
         GeneratedShape before = shape(draft);
         draft.rotateClockwise();
         GeneratedShape rotated = shape(draft);
@@ -190,7 +192,7 @@ class EditorDraftTest {
         draft.setText(EditorDraft.WIDTH, "5");
         assertTrue(draft.convertToCustom(ShapeLimits.DEFAULT));
         assertEquals(15, draft.custom().count());
-        assertTrue(draft.custom().undo());
+        assertTrue(draft.undo());
         assertEquals(1, draft.custom().count());
         assertEquals(3, draft.custom().width());
         assertTrue(draft.custom().get(1, 1, 0));

@@ -30,6 +30,7 @@ class EncodedShapeTest {
                 new ShapeParams.Stair(3, 4, 2, 1, false),
                 new ShapeParams.Corridor(3, 3, 6, 1, 1, true),
                 new ShapeParams.Custom(lShape()),
+                new ShapeParams.Custom(lShape(), Orientation.Mode.PLAYER_HORIZONTAL),
                 new ShapeParams.Custom(ShapeMask.full(32, 32, 32, new Cell(0, 0, 0))));
         for (ShapeParams p : params) {
             for (ShapeTransform transform : ShapeTransform.all()) {

@@ -182,7 +182,7 @@ public final class WorldPreview {
         BlockPos start = next.origin();
         BlockState startState = level.getBlockState(start);
         Orientation orientation = Orientation.orient(next.face(), next.facing(),
-                Orientation.Mode.forType(config.type()));
+                config.orientationMode());
         float startProgress = startState.getDestroyProgress(player, level, start);
         Map<Offset, CellCategory> cells = new LinkedHashMap<>();
         for (Offset offset : valid.shape().worldOffsets(orientation)) {

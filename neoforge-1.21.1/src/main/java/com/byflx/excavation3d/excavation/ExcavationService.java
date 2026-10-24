@@ -216,7 +216,7 @@ public final class ExcavationService {
         }
         BlockPos pos = event.getPos().immutable();
         Orientation orientation = Orientation.orient(hitFace(player, level, pos, state), player.getDirection(),
-                Orientation.Mode.forType(config.type()));
+                config.orientationMode());
         STARTS.attempt(id, pos, new Pending(level, pos, state, valid.shape().worldOffsets(orientation),
                 state.getDestroyProgress(player, level, pos), player.getInventory().selected, data.toolId()));
     }

@@ -54,6 +54,51 @@ public final class ExcavationGameTests {
     private ExcavationGameTests() {
     }
 
+    /** A top-face hit disagrees with player facing, exposing a lost orientation mode on conversion. */
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void convertedStairsExcavateInTheOriginalDirection(GameTestHelper helper) {
+        ShapeConfig original = ShapeConfig.of(new ShapeParams.Stair(1, 3, 1, 1, true));
+        var draft = com.byflx.excavation3d.editor.EditorDraft.fromConfig(original);
+        if (!draft.convertToCustom(com.byflx.excavation3d.shape.ShapeLimits.DEFAULT)) {
+            helper.fail("Stair conversion failed");
+            return;
+        }
+        ShapeConfig converted = draft.evaluate(com.byflx.excavation3d.shape.ShapeLimits.DEFAULT).config();
+        List<BlockPos> volume = BlockPos.betweenClosedStream(START.offset(-1, -2, -2), START.offset(1, 2, 2))
+                .map(BlockPos::immutable).toList();
+        // Explicit north-facing stair, independent of the config's orientation implementation.
+        var expected = java.util.Set.of(START, START.north(), START.north().above(),
+                START.north(2), START.north(2).above(), START.north(2).above(2));
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, original.params());
+        BlockPos start = helper.absolutePos(START);
+        player.moveTo(start.getX() + 0.5, start.getY() + 3, start.getZ() + 0.5, 180, 90);
+        for (BlockPos pos : volume) helper.setBlock(pos, Blocks.DIRT);
+        player.gameMode.destroyBlock(start);
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            assertStairSelection(helper, volume, expected);
+            expectResult(helper, player, expected.size(), Map.of());
+            for (BlockPos pos : volume) helper.setBlock(pos, Blocks.DIRT);
+            player.setItemInHand(InteractionHand.MAIN_HAND, shapedTool(helper, Items.IRON_SHOVEL, converted.params()));
+            player.lastResult = null;
+            player.resultCount = 0;
+            player.gameMode.destroyBlock(start);
+            helper.runAfterDelay(SETTLE_TICKS, () -> {
+                assertStairSelection(helper, volume, expected);
+                expectDamage(helper, player, expected.size());
+                expectResult(helper, player, expected.size(), Map.of());
+                finish(helper, player);
+            });
+        });
+    }
+
+    private static void assertStairSelection(GameTestHelper helper, List<BlockPos> volume,
+            java.util.Set<BlockPos> expected) {
+        for (BlockPos pos : volume) {
+            if (expected.contains(pos)) helper.assertBlockNotPresent(Blocks.DIRT, pos);
+            else helper.assertBlockPresent(Blocks.DIRT, pos);
+        }
+    }
+
     @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
     public static void successfulStartMinesTheShapeExactlyOnce(GameTestHelper helper) {
         buildWall(helper, Blocks.DIRT);

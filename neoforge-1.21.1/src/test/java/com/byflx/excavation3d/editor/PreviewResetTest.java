@@ -74,17 +74,17 @@ class PreviewResetTest {
         assertFalse(save.rollbackEdit(before, save.submit()));
     }
 
-    @Test void rollbackAtTheUndoLimitPreservesTheOldestEntryAndConversionBoundary() {
+    @Test void rollbackAtTheUndoLimitPreservesTheOldestEntryIncludingConversion() {
         var draft = EditorDraft.defaults();
         var config = draft.evaluate(ShapeLimits.DEFAULT).config();
         assertEquals(EditorDraft.PreviewEdit.CHANGED, draft.editTemplatePreview(
                 new PreviewPicking.Hit(new Cell(0, 2, 0), PreviewPicking.Face.UP, true, 1),
                 true, ShapeLimits.DEFAULT));
-        for (int i = 0; i < CustomMaskDraft.MAX_UNDO; i++) draft.custom().set(1, 3, 0, i % 2 == 0);
+        for (int i = 0; i < CustomMaskDraft.MAX_UNDO - 1; i++) draft.custom().set(1, 3, 0, i % 2 == 0);
         Runnable restore = draft.previewRollback();
         draft.custom().set(2, 3, 0, true); // Temporarily displaces the oldest undo entry.
         restore.run();
-        for (int i = 0; i < CustomMaskDraft.MAX_UNDO; i++) assertTrue(draft.undo());
+        for (int i = 0; i < CustomMaskDraft.MAX_UNDO - 1; i++) assertTrue(draft.undo());
         assertTrue(draft.undo(), "the original conversion boundary remains below all custom edits");
         assertEquals(config, draft.evaluate(ShapeLimits.DEFAULT).config());
         assertTrue(draft.redo());

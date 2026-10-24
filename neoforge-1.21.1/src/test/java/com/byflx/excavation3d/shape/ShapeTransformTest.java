@@ -112,4 +112,14 @@ class ShapeTransformTest {
                     after.positions().stream().filter(c -> c.z() == layer).count());
         }
     }
+    @org.junit.jupiter.api.Test
+    void displayedHorizontalMirrorFlipsEveryRotationIncludingTheAnchor() {
+        var mask = ShapeMask.of(3, 2, 1, java.util.BitSet.valueOf(new long[] {0b010111}), new Cell(1, 0, 0));
+        for (ShapeTransform transform : ShapeTransform.all()) {
+            ShapeMask shown = transform.apply(mask);
+            ShapeMask expected = new ShapeTransform(0, true).apply(shown);
+            assertEquals(expected, transform.mirroredHorizontally().apply(mask), transform.toString());
+            assertEquals(transform, transform.mirroredHorizontally().mirroredHorizontally());
+        }
+    }
 }

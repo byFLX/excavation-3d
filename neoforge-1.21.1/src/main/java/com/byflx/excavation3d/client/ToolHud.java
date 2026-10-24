@@ -46,13 +46,13 @@ public final class ToolHud {
         Component line = ClientState.bypassActive()
                 ? Component.translatable("tool.excavation3d.single_block").withStyle(ChatFormatting.YELLOW)
                 : ClientState.toolSummary(data);
-        if (WorldPreview.active() && Screen.hasShiftDown()) {
+        if (!ClientState.bypassActive() && WorldPreview.active() && Screen.hasShiftDown()) {
             line = Component.translatable("hud.excavation3d.preview",
                     WorldPreview.count(CellCategory.PRESENT), WorldPreview.count(CellCategory.AIR),
                     WorldPreview.count(CellCategory.EXCLUDED), WorldPreview.count(CellCategory.UNLOADED))
                     .withStyle(ChatFormatting.GRAY);
         }
-        if (state.feedback(Util.getMillis()) instanceof Component feedback) line = feedback;
+        if (!ClientState.bypassActive() && state.feedback(Util.getMillis()) instanceof Component feedback) line = feedback;
         GuiGraphics g = event.getGuiGraphics();
         List<FormattedCharSequence> lines = mc.font.split(line, (int) ((g.guiWidth() - 16) / SCALE));
         float textHeight = lines.size() * mc.font.lineHeight * SCALE;

@@ -26,7 +26,8 @@ public final class ShapeCodecs {
             Codec.INT.listOf().fieldOf("values").forGetter(EncodedShape::values),
             Codec.LONG.listOf().optionalFieldOf("mask", List.of()).forGetter(EncodedShape::maskWords),
             Codec.INT.optionalFieldOf("rotation", 0).forGetter(EncodedShape::rotation),
-            Codec.BOOL.optionalFieldOf("mirrored", false).forGetter(EncodedShape::mirrored)
+            Codec.BOOL.optionalFieldOf("mirrored", false).forGetter(EncodedShape::mirrored),
+            Codec.BOOL.optionalFieldOf("player_horizontal", false).forGetter(EncodedShape::playerHorizontal)
     ).apply(instance, EncodedShape::new));
 
     /** Decodes to a config with revision 0; structurally broken data is a codec error, not an exception. */
@@ -72,6 +73,7 @@ public final class ShapeCodecs {
         }
         buf.writeByte(encoded.rotation());
         buf.writeBoolean(encoded.mirrored());
+        buf.writeBoolean(encoded.playerHorizontal());
     }
 
     /** @throws DecoderException for malformed or oversized data */
@@ -99,8 +101,9 @@ public final class ShapeCodecs {
         }
         int rotation = buf.readUnsignedByte();
         boolean mirrored = buf.readBoolean();
+        boolean playerHorizontal = buf.readBoolean();
         EncodedShape encoded = new EncodedShape(formatVersion, ShapeType.values()[typeIndex], values, words,
-                rotation, mirrored);
+                rotation, mirrored, playerHorizontal);
         return switch (encoded.decode(revision)) {
             case EncodedShape.Ok ok -> ok.config();
             case EncodedShape.Error error -> throw new DecoderException("Invalid shape: " + error.message());

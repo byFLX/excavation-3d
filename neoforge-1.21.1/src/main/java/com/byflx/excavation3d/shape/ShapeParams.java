@@ -40,9 +40,15 @@ public sealed interface ShapeParams {
         }
     }
 
-    record Custom(ShapeMask mask) implements ShapeParams {
+    record Custom(ShapeMask mask, Orientation.Mode orientation) implements ShapeParams {
+        /** Existing Custom shapes retain hit-face orientation. */
+        public Custom(ShapeMask mask) {
+            this(mask, Orientation.Mode.HIT_FACE);
+        }
+
         public Custom {
             Objects.requireNonNull(mask, "mask");
+            Objects.requireNonNull(orientation, "orientation");
         }
 
         @Override

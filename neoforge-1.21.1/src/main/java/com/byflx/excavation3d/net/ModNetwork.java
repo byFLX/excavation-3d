@@ -19,7 +19,7 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
  */
 public final class ModNetwork {
     /** "4": enabled component state and pause/resume; world preview is client-only. */
-    private static final String VERSION = "4";
+    private static final String VERSION = "5";
 
     private ModNetwork() {
     }

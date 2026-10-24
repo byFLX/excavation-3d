@@ -10,7 +10,8 @@ import java.util.Objects;
 
 /**
  * Mutable layer-editor draft of a custom mask (plan §6.5). Only the editor holds one; it becomes an
- * immutable {@link ShapeMask} through {@link #toMask()}. Every editing operation can be undone.
+ * immutable {@link ShapeMask} through {@link #toMask()}. Edits use the owning EditorDraft history,
+ * or this grid's own history when used on its own.
  *
  * <p>Painting sets or clears cells instead of toggling them, so a drag that passes a cell twice
  * cannot flip it back. A stroke records a single undo step, taken lazily at its first real change.
@@ -36,6 +37,11 @@ public final class CustomMaskDraft {
     private BitSet clipboard;
     private int clipboardWidth;
     private int clipboardHeight;
+    private Runnable editListener;
+
+    /** Lets the owning editor record mask edits in its chronological draft history. */
+    void onEdit(Runnable listener) { editListener = listener; }
+
     private boolean strokeActive;
     private boolean strokeSaved;
     private final Deque<Snapshot> undo = new ArrayDeque<>();
@@ -62,10 +68,13 @@ public final class CustomMaskDraft {
     /** Restores a speculative preview click, including history displaced at the undo limit. */
     Runnable previewRollback() {
         Snapshot before = snapshot();
+        boolean previousStrokeActive = strokeActive, previousStrokeSaved = strokeSaved;
         Deque<Snapshot> previousUndo = new ArrayDeque<>(undo);
         Deque<Snapshot> previousRedo = new ArrayDeque<>(redo);
         return () -> {
             restore(before);
+            strokeActive = previousStrokeActive;
+            strokeSaved = previousStrokeSaved;
             undo.clear();
             undo.addAll(previousUndo);
             redo.clear();
@@ -281,6 +290,10 @@ public final class CustomMaskDraft {
     }
 
     private void pushUndo() {
+        if (editListener != null) {
+            editListener.run();
+            return;
+        }
         undo.push(snapshot());
         while (undo.size() > MAX_UNDO) {
             undo.removeLast();

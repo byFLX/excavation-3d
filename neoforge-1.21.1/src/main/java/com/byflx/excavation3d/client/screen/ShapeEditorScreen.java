@@ -55,7 +55,6 @@ public final class ShapeEditorScreen extends Screen {
     private static final int MARGIN = 6;
     private static final int FIELD_WIDTH = 32;
     private static final int STEP_WIDTH = 14;
-    private static final int ICON_SIZE = 20;
     private static final int TEXT = 0xE0E0E0;
     private static final int MUTED = 0x909090;
     private static final int OK = 0x55FF55;
@@ -128,12 +127,13 @@ public final class ShapeEditorScreen extends Screen {
     private final Map<AbstractWidget, Integer> scrolledWidgets = new LinkedHashMap<>();
     private final List<Button> stepButtons = new ArrayList<>();
     /** Widgets on the preview; drawn after it, so the preview never covers them. */
-    private final List<AbstractWidget> previewWidgets = new ArrayList<>();
     private final List<RowLabel> labels = new ArrayList<>();
     private record SizeRow(String field, int y, int valueX) { }
     private final List<SizeRow> sizeRows = new ArrayList<>();
     private String overwriteName;
-    private EditBox layerBox;
+    private Button layerPosition;
+    private Button mirrorButton;
+    private Button resetViewButton;
     private Button layerMenuButton;
     private Button applyButton;
     private Button undoButton;
@@ -177,10 +177,10 @@ public final class ShapeEditorScreen extends Screen {
         }
         scrolledWidgets.clear();
         stepButtons.clear();
-        previewWidgets.clear();
         labels.clear();
         sizeRows.clear();
-        layerBox = null;
+        layerPosition = null;
+        mirrorButton = null;
         layerMenuButton = null;
         undoButton = null;
         redoButton = null;
@@ -201,6 +201,19 @@ public final class ShapeEditorScreen extends Screen {
 
         int y = contentTop;
         typeRow(y);
+        y += ROW;
+        Button reset = Button.builder(Component.translatable("gui.excavation3d.reset_defaults"), b -> {
+            draft.resetDefaults();
+            anchorMode = false;
+            pendingResize = null;
+            layer = 0;
+            saveState.edited();
+            rebuildWidgets();
+        }).bounds(leftX, y, leftW, 20).build();
+        reset.setTooltip(Tooltip.create(Component.translatable(draft.type() == ShapeType.CUSTOM
+                ? "gui.excavation3d.reset_defaults.custom_tooltip" : "gui.excavation3d.reset_defaults.tooltip",
+                ShapeTexts.typeName(draft.type()))));
+        scrolled(reset, y);
         y += ROW;
         for (String field : EditorDraft.fields(draft.type())) {
             y = fieldRow(field, y);
@@ -227,19 +240,28 @@ public final class ShapeEditorScreen extends Screen {
                 labels.add(new RowLabel(orientation, y - 4));
                 y += font.split(orientation, leftW).size() * font.lineHeight + 3;
             }
-            case CUSTOM -> {
-                y = customRows(y);
-                gridBaseY = y;
-            }
+            case CUSTOM -> y = transformRow(y);
             default -> {
             }
         }
-        if (draft.type() != ShapeType.CUSTOM && draft.canRedo()) y = historyRow(y);
+        y = historyRow(y);
+        if (draft.type() == ShapeType.CUSTOM) {
+            y = customRows(y);
+            gridBaseY = y;
+        }
         contentHeight = y - contentTop;
         layoutGrid();
         scroll = Mth.clamp(scroll, 0, maxScroll());
 
-        initPreviewButtons();
+        layoutCaptions();
+        Component resetView = Component.translatable("gui.excavation3d.preview.reset_view");
+        int resetWidth = Math.min(font.width(resetView) + 10, (previewX1 - previewX0) / 2);
+        resetViewButton = addRenderableWidget(Button.builder(resetView, b -> {
+            previewGesture.reset();
+            rollbackPreviewClick = null;
+            camera.reset();
+            preview.resetScale();
+        }).bounds(previewX1 - resetWidth, previewY1 + 2, resetWidth, 18).build());
         initHeader();
         initBottom();
         refresh();
@@ -258,7 +280,7 @@ public final class ShapeEditorScreen extends Screen {
         previewX0 = layout.previewLeft();
         previewX1 = layout.previewRight();
         previewY0 = contentTop;
-        previewY1 = Math.max(previewY0 + 20, contentBottom);
+        previewY1 = Math.max(previewY0 + 20, contentBottom - ROW);
     }
 
     /** One icon per shape type; the custom icon turns a valid template into a custom shape. */
@@ -299,32 +321,44 @@ public final class ShapeEditorScreen extends Screen {
     private int customRows(int y) {
         CustomMaskDraft custom = draft.custom();
         layer = Mth.clamp(layer, 0, custom.depth() - 1);
-        labels.add(new RowLabel(Component.translatable("gui.excavation3d.layer"), y));
-        int nextX = leftX + leftW - STEP_WIDTH;
-        int boxX = nextX - 2 - FIELD_WIDTH;
+        Component layerText = Component.translatable("gui.excavation3d.layer");
+        Component menuText = Component.translatable("gui.excavation3d.layer.menu");
+        Component anchorText = Component.translatable("gui.excavation3d.anchor");
+        int positionWidth = Math.max(FIELD_WIDTH, font.width(Component.literal(custom.depth() + "/" + custom.depth())) + 8);
+        int navigationWidth = 2 * STEP_WIDTH + positionWidth + 4;
+        int labelWidth = font.width(layerText) + 4;
+        int menuWidth = font.width(menuText) + 4;
+        int anchorWidth = font.width(anchorText) + 4;
+        boolean singleRow = labelWidth + navigationWidth + menuWidth + anchorWidth + 4 <= leftW;
+        labels.add(new RowLabel(layerText, y));
+        int nextX = (singleRow ? leftX + labelWidth + navigationWidth : leftX + leftW) - STEP_WIDTH;
+        int boxX = nextX - 2 - positionWidth;
         int prevX = boxX - 2 - STEP_WIDTH;
         scrolled(Button.builder(Component.literal("<"), b -> setLayer(layer - 1))
                 .bounds(prevX, y, STEP_WIDTH, 20).build(), y);
-        layerBox = new EditBox(font, boxX + 1, y + 1, FIELD_WIDTH - 2, 18, Component.translatable("gui.excavation3d.layer"));
-        layerBox.setMaxLength(NumericInput.MAX_LENGTH + 1);
-        layerBox.setValue(Integer.toString(layer + 1));
-        layerBox.setResponder(this::onLayerEdited);
-        scrolled(layerBox, y + 1);
+        layerPosition = Button.builder(layerLabel(), b -> { }).bounds(boxX, y, positionWidth, 20).build();
+        layerPosition.active = false;
+        scrolled(layerPosition, y);
         scrolled(Button.builder(Component.literal(">"), b -> setLayer(layer + 1))
                 .bounds(nextX, y, STEP_WIDTH, 20).build(), y);
-        y += ROW;
-
-        List<Button> tools = buttonRow(y,
-                Button.builder(Component.translatable("gui.excavation3d.layer.menu"), b -> toggleLayerMenu()),
-                Button.builder(Component.translatable("gui.excavation3d.anchor"), b -> {
-                    anchorMode = !anchorMode;
-                    refresh();
-                }));
-        layerMenuButton = tools.get(0);
-        anchorButton = tools.get(1);
-        y += ROW;
-
-        y = historyRow(y);
+        Button.Builder layerTools = Button.builder(menuText, b -> toggleLayerMenu());
+        Button.Builder setStart = Button.builder(anchorText, b -> {
+            anchorMode = !anchorMode;
+            refresh();
+        });
+        if (singleRow) {
+            int menuX = nextX + STEP_WIDTH + 2;
+            layerMenuButton = scrolled(layerTools.bounds(menuX, y, menuWidth, 20).build(), y);
+            int anchorX = menuX + menuWidth + 2;
+            anchorButton = scrolled(setStart.bounds(anchorX, y, leftX + leftW - anchorX, 20).build(), y);
+            y += ROW;
+        } else {
+            y += ROW;
+            List<Button> tools = buttonRow(y, layerTools, setStart);
+            layerMenuButton = tools.get(0);
+            anchorButton = tools.get(1);
+            y += ROW;
+        }
 
         resizeBaseY = y;
         List<Button> resize = buttonRow(y,
@@ -345,16 +379,13 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private void history(boolean redo) {
-        ShapeType before = draft.type();
         if (!(redo ? draft.redo() : draft.undo())) return;
         previewNotice = null;
-        if (draft.type() != before) {
-            anchorMode = false;
-            pendingResize = null;
-            scroll = 0;
-            saveState.edited();
-            rebuildWidgets();
-        } else afterCustomStructureChange();
+        anchorMode = false;
+        pendingResize = draft.requestedCustomResize(limits())
+                .filter(check -> check.anchorInside() && check.lostCells() > 0).orElse(null);
+        saveState.edited();
+        rebuildWidgets();
     }
 
     private List<Button> buttonRow(int y, Button.Builder... builders) {
@@ -369,23 +400,25 @@ public final class ShapeEditorScreen extends Screen {
         return buttons;
     }
 
-    /** Custom-only transforms in the preview corner. */
-    private void initPreviewButtons() {
-        layoutCaptions(previewX1);
-        if (draft.type() != ShapeType.CUSTOM) return;
-        int x = previewX1 - 2 - ICON_SIZE;
-        int y = previewY0 + 2;
-        int buttonsX = x - (ICON_SIZE + 2);
-        layoutCaptions(buttonsX);
-        previewWidget(IconButton.rotate(x, y, ICON_SIZE, Component.translatable("gui.excavation3d.rotate"), b -> {
-            draft.rotateClockwise();
-            changed();
-        }));
-        x -= ICON_SIZE + 2;
-        previewWidget(IconButton.mirror(x, y, ICON_SIZE, Component.translatable("gui.excavation3d.mirror"), b -> {
-            draft.toggleMirror();
-            changed();
-        }));
+    private int transformRow(int y) {
+        List<Button> transforms = buttonRow(y,
+                Button.builder(Component.translatable("gui.excavation3d.rotate"), b -> {
+                    draft.rotateClockwise();
+                    changed();
+                }),
+                Button.builder(mirrorLabel(), b -> {
+                    draft.toggleMirror();
+                    changed();
+                }));
+        transforms.get(0).setTooltip(Tooltip.create(Component.translatable("gui.excavation3d.rotate.tooltip")));
+        mirrorButton = transforms.get(1);
+        mirrorButton.setTooltip(Tooltip.create(Component.translatable("gui.excavation3d.mirror.tooltip")));
+        return y + ROW;
+    }
+
+    private Component mirrorLabel() {
+        return Component.translatable(draft.transform().mirrored()
+                ? "gui.excavation3d.mirror.on" : "gui.excavation3d.mirror.off");
     }
 
     /** The captions the preview can show; the strip is sized for the longest, so it never jumps. */
@@ -396,35 +429,21 @@ public final class ShapeEditorScreen extends Screen {
         return captions;
     }
 
-    /**
-     * Gives the captions their own strips, so neither the icon buttons nor the shape cover them. A
-     * caption sits beside the buttons when every caption fits there, otherwise below them, wrapped
-     * to the panel width. The camera hint wraps upwards from the bottom edge.
-     */
-    private void layoutCaptions(int buttonsX) {
-        int textX = previewX0 + 4;
-        int fullWidth = Math.max(20, previewX1 - 4 - textX);
-        int besideWidth = buttonsX - 4 - textX;
-        List<Component> captions = previewCaptions();
-        int widest = 0;
-        for (Component caption : captions) {
-            widest = Math.max(widest, font.width(caption));
-        }
-        boolean beside = widest <= besideWidth;
-        captionWidth = beside ? besideWidth : fullWidth;
-        captionY = beside ? previewY0 + 6 : previewY0 + 2 + ICON_SIZE + 3;
-        int lines = 1;
-        for (Component caption : captions) {
-            lines = Math.max(lines, font.split(caption, captionWidth).size());
-        }
-        sceneY0 = Math.max(previewY0 + 2 + ICON_SIZE + 2, captionY + lines * font.lineHeight + 2);
+    /** The preview has only captions, scene and hints; all draft controls live in the left column. */
+    private void layoutCaptions() {
+        int fullWidth = Math.max(20, previewX1 - previewX0 - 8);
+        captionWidth = fullWidth;
+        captionY = previewY0 + 6;
+        int lines = previewCaptions().stream().mapToInt(c -> font.split(c, fullWidth).size()).max().orElse(1);
+        sceneY0 = captionY + lines * font.lineHeight + 2;
         int hintLines = controlHints().stream().mapToInt(line -> font.split(line, fullWidth).size()).sum();
         hintY = previewY1 - 6 - hintLines * (font.lineHeight + 2);
-        sceneY1 = Math.max(sceneY0 + 1, hintY - font.lineHeight - 9);
+        sceneY1 = Math.max(sceneY0 + 1, hintY - 4);
     }
 
     private List<Component> controlHints() {
-        return List.of(Component.translatable("gui.excavation3d.preview.custom_edit"));
+        return List.of(Component.translatable(draft.type() == ShapeType.CUSTOM
+                ? "gui.excavation3d.preview.custom_controls" : "gui.excavation3d.preview.controls"));
     }
 
     private void drawWrapped(GuiGraphics graphics, Component text, int y, int maxWidth, int color) {
@@ -432,11 +451,6 @@ public final class ShapeEditorScreen extends Screen {
             graphics.drawString(font, line, previewX0 + 4, y, color);
             y += font.lineHeight;
         }
-    }
-
-    private void previewWidget(AbstractWidget widget) {
-        previewWidgets.add(widget);
-        addWidget(widget);
     }
 
     private void initHeader() {
@@ -604,12 +618,12 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private void onFieldEdited(String field, String text) {
-        draft.setText(field, text);
-        saveState.edited();
-        sizeEdited = true;
-        if (draft.type() == ShapeType.CUSTOM) {
-            handleCustomResize();
-        }
+        draft.edit(() -> {
+            draft.setText(field, text);
+            saveState.edited();
+            sizeEdited = true;
+            if (draft.type() == ShapeType.CUSTOM) handleCustomResize();
+        });
         refresh();
     }
 
@@ -664,14 +678,6 @@ public final class ShapeEditorScreen extends Screen {
         scroll = Mth.clamp(scroll, 0, maxScroll());
     }
 
-    /** After undo/redo the grid size may differ; bring fields, layer and grid in line. */
-    private void afterCustomStructureChange() {
-        pendingResize = null;
-        draft.syncCustomTexts();
-        afterResize();
-        changed();
-    }
-
     private void customEdited(boolean changedSomething) {
         if (changedSomething) {
             // Painting or moving the anchor can change what a pending shrink would lose.
@@ -682,18 +688,11 @@ public final class ShapeEditorScreen extends Screen {
 
     private void setLayer(int newLayer) {
         layer = Mth.clamp(newLayer, 0, draft.custom().depth() - 1);
-        if (layerBox != null && !layerBox.getValue().equals(Integer.toString(layer + 1))) {
-            layerBox.setValue(Integer.toString(layer + 1));
-        }
+        if (layerPosition != null) layerPosition.setMessage(layerLabel());
     }
 
-    private void onLayerEdited(String text) {
-        if (NumericInput.parse(text, 1, draft.custom().depth()) instanceof NumericInput.Valid valid) {
-            layer = valid.value() - 1;
-            layerBox.setTextColor(TEXT);
-        } else {
-            layerBox.setTextColor(ERROR);
-        }
+    private Component layerLabel() {
+        return Component.literal((layer + 1) + "/" + draft.custom().depth());
     }
 
     /**
@@ -735,6 +734,7 @@ public final class ShapeEditorScreen extends Screen {
             undoButton.active = draft.canUndo();
             redoButton.active = draft.canRedo();
         }
+        if (mirrorButton != null) mirrorButton.setMessage(mirrorLabel());
         if (anchorButton != null) {
             anchorButton.setMessage(Component.translatable(anchorMode
                     ? "gui.excavation3d.anchor.picking" : "gui.excavation3d.anchor"));
@@ -1413,16 +1413,6 @@ public final class ShapeEditorScreen extends Screen {
             drawWrapped(graphics, Component.translatable("gui.excavation3d.preview.selection"), captionY,
                     captionWidth, MUTED);
         }
-        if (shown != null) {
-            Component summary = Component.translatable("gui.excavation3d.preview.summary",
-                    shown.width(), shown.height(), shown.depth(), shown.count());
-            float scale = Math.min(1.0F, (float) (previewX1 - previewX0 - 8) / Math.max(1, font.width(summary)));
-            graphics.pose().pushPose();
-            graphics.pose().translate(previewX0 + 4, sceneY1 + 4, 0);
-            graphics.pose().scale(scale, scale, 1);
-            graphics.drawString(font, summary, 0, 0, current == null ? MUTED : TEXT);
-            graphics.pose().popPose();
-        }
         int helpY = hintY;
         for (Component hint : controlHints()) {
             for (FormattedCharSequence line : font.split(hint, Math.max(20, previewX1 - previewX0 - 8))) {
@@ -1431,8 +1421,15 @@ public final class ShapeEditorScreen extends Screen {
             }
         }
         graphics.disableScissor();
-        for (AbstractWidget widget : previewWidgets) {
-            widget.render(graphics, mouseX, mouseY, partialTick);
+        if (shown != null) {
+            Component summary = Component.translatable("gui.excavation3d.preview.summary",
+                    shown.width(), shown.height(), shown.depth(), shown.count());
+            float scale = Math.min(1.0F, (float) (resetViewButton.getX() - previewX0 - 8) / Math.max(1, font.width(summary)));
+            graphics.pose().pushPose();
+            graphics.pose().translate(previewX0 + 4, previewY1 + 7, 0);
+            graphics.pose().scale(scale, scale, 1);
+            graphics.drawString(font, summary, 0, 0, current == null ? MUTED : TEXT);
+            graphics.pose().popPose();
         }
     }
 

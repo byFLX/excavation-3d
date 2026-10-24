@@ -19,6 +19,10 @@ public record ShapeConfig(int formatVersion, ShapeParams params, ShapeTransform 
         return new ShapeConfig(FORMAT_VERSION, params, transform, 0L);
     }
 
+    public Orientation.Mode orientationMode() {
+        return params instanceof ShapeParams.Custom custom ? custom.orientation() : Orientation.Mode.forType(type());
+    }
+
     public ShapeType type() {
         return params.type();
     }
