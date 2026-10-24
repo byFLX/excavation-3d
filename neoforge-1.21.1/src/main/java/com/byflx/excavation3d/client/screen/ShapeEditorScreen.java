@@ -8,6 +8,7 @@ import com.byflx.excavation3d.editor.ApplyAvailability;
 import com.byflx.excavation3d.editor.DraftSaveState;
 import com.byflx.excavation3d.editor.EditorDraft;
 import com.byflx.excavation3d.editor.EditorLayout;
+import com.byflx.excavation3d.editor.FavoritesOverview;
 import com.byflx.excavation3d.editor.PanelScroll;
 import com.byflx.excavation3d.editor.SessionHandshake;
 import com.byflx.excavation3d.editor.SizeRowStep;
@@ -79,6 +80,7 @@ public final class ShapeEditorScreen extends Screen {
     private boolean sizeEdited;
     private final PreviewCamera camera = new PreviewCamera();
     private final ShapePreviewRenderer preview = new ShapePreviewRenderer();
+    private final ShapePreviewRenderer favoritePreview = new ShapePreviewRenderer();
     private final PreviewGesture previewGesture = new PreviewGesture();
     private boolean preservePreviewClick;
     private Runnable rollbackPreviewClick;
@@ -100,7 +102,9 @@ public final class ShapeEditorScreen extends Screen {
     private Boolean paintValue;
     private int paintButton = -1;
     private boolean closeAfterApply;
-    private String presetCursor = "";
+    private final FavoritesOverview favorites = new FavoritesOverview();
+    private Component favoriteStatus = Component.empty();
+    private int favoriteStatusColor = MUTED;
 
     private int leftX;
     private int leftW;
@@ -144,6 +148,7 @@ public final class ShapeEditorScreen extends Screen {
 
     private Menu openMenu = Menu.NONE;
     private DropdownMenu menu;
+    private FavoritesPanel favoritesPanel;
     private EditBox presetName;
     private Button presetSave;
 
@@ -190,6 +195,8 @@ public final class ShapeEditorScreen extends Screen {
         // A rebuild (resize, GUI scale, type change, preset load) closes an open menu.
         openMenu = Menu.NONE;
         menu = null;
+        favoritesPanel = null;
+        favorites.cancelDelete();
         presetName = null;
         presetSave = null;
         gridBaseY = -1;
@@ -454,8 +461,8 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private void initHeader() {
-        Component label = Component.translatable("gui.excavation3d.favorite.save_as");
-        int w = Math.max(70, font.width(label) + 16);
+        Component label = Component.translatable("gui.excavation3d.favorite.menu");
+        int w = Math.min(width - 2 * MARGIN, Math.max(70, font.width(label) + 16));
         addRenderableWidget(Button.builder(label, b -> togglePresetsMenu())
                 .bounds(width - MARGIN - w, 2, w, 18).build());
     }
@@ -506,6 +513,12 @@ public final class ShapeEditorScreen extends Screen {
 
     // ---------------------------------------------------------------- menus
 
+    private boolean menuOpen() { return openMenu != Menu.NONE; }
+
+    private boolean menuContains(double mx, double my) {
+        return favoritesPanel != null ? favoritesPanel.contains(mx, my) : menu != null && menu.contains(mx, my);
+    }
+
     private void closeMenu() {
         if (presetName != null) {
             setFocused(null);
@@ -515,6 +528,8 @@ public final class ShapeEditorScreen extends Screen {
         presetName = null;
         presetSave = null;
         menu = null;
+        favoritesPanel = null;
+        favorites.cancelDelete();
         openMenu = Menu.NONE;
         overwriteName = null;
     }
@@ -527,14 +542,15 @@ public final class ShapeEditorScreen extends Screen {
         }
     }
 
-    /** Small inline favorite name field, with a second Save confirming overwrite. */
+    /** Fixed save row above the scrollable favorite overview. */
     private void openPresetsMenu() {
-        int menuW = Math.min(width - 2 * MARGIN, 180);
-        int x = width - MARGIN - menuW;
-        int y = contentTop;
-        int header = 24;
-        menu = new DropdownMenu(x, y, menuW, header + 14, height - 30, List.of(), Component.empty());
+        favoritesPanel = new FavoritesPanel(width, height, contentTop, favorites, this::loadFavorite, this::deleteFavorite);
+        refreshFavorites();
+        int menuW = favoritesPanel.width();
+        int x = favoritesPanel.x();
+        int y = favoritesPanel.y();
         openMenu = Menu.PRESETS;
+        favoriteStatus = Component.empty();
 
         Component saveLabel = Component.translatable("gui.excavation3d.preset.save");
         int saveW = Math.max(40, font.width(saveLabel) + 10);
@@ -542,10 +558,10 @@ public final class ShapeEditorScreen extends Screen {
                 Component.translatable("gui.excavation3d.preset.name"));
         presetName.setMaxLength(PresetRepository.MAX_NAME_LENGTH);
         presetName.setHint(Component.translatable("gui.excavation3d.preset.name"));
-        presetName.setValue(presetCursor);
+        presetName.setValue(favorites.name());
         // Kept as typed, so a resize or GUI scale change (which rebuilds the screen) never loses it.
         presetName.setResponder(text -> {
-            presetCursor = text;
+            favorites.setName(text);
             overwriteName = null;
         });
         presetSave = Button.builder(saveLabel, b -> savePreset())
@@ -788,26 +804,65 @@ public final class ShapeEditorScreen extends Screen {
 
     // ---------------------------------------------------------------- favorites
 
+    private void refreshFavorites() {
+        if (favoritesPanel == null) return;
+        PresetRepository repository = PresetRepository.get();
+        favoritesPanel.setRows(FavoritesOverview.rows(repository.names(), repository::find,
+                evaluation != null && !evaluation.resizePending() ? evaluation.config() : null));
+    }
+
+    private void favoriteStatus(Component message, int color) {
+        favoriteStatus = message;
+        favoriteStatusColor = color;
+        setStatus(message, color);
+    }
+
+    private void loadFavorite(FavoritesOverview.Row row) {
+        int favoriteScroll = favoritesPanel.scrollOffset();
+        favorites.select(row, draft, saveState);
+        anchorMode = false;
+        pendingResize = null;
+        layer = 0;
+        scroll = 0;
+        sizeEdited = false;
+        rebuildWidgets();
+        openPresetsMenu();
+        favoritesPanel.restoreScroll(favoriteScroll);
+        favoriteStatus(Component.translatable("gui.excavation3d.favorite.loaded", row.name()), OK);
+    }
+
+    private void deleteFavorite(String name) {
+        overwriteName = null;
+        if (PresetRepository.get().delete(name)) {
+            refreshFavorites();
+            favoriteStatus(Component.translatable("gui.excavation3d.favorite.deleted", name), OK);
+        } else {
+            favoriteStatus(Component.translatable("gui.excavation3d.preset.io_error"), ERROR);
+        }
+    }
+
     private void savePreset() {
         if (evaluation == null || !evaluation.isValid() || pendingResize != null) {
-            setStatus(Component.translatable("gui.excavation3d.preset.unsavable"), ERROR);
+            favoriteStatus(Component.translatable("gui.excavation3d.preset.unsavable"), ERROR);
             return;
         }
-        String name = presetName == null ? presetCursor : presetName.getValue();
+        favorites.cancelDelete();
+        String name = presetName == null ? favorites.name() : presetName.getValue();
         if (PresetRepository.get().find(name).isPresent() && !name.trim().equals(overwriteName)) {
             overwriteName = name.trim();
             return;
         }
         switch (PresetRepository.get().save(name, evaluation.config())) {
             case SAVED -> {
-                setStatus(Component.translatable("gui.excavation3d.preset.saved", name.trim()), OK);
-                closeMenu();
+                overwriteName = null;
+                refreshFavorites();
+                favoriteStatus(Component.translatable("gui.excavation3d.preset.saved", name.trim()), OK);
             }
-            case INVALID_NAME -> setStatus(Component.translatable("gui.excavation3d.preset.invalid_name",
+            case INVALID_NAME -> favoriteStatus(Component.translatable("gui.excavation3d.preset.invalid_name",
                     PresetRepository.MAX_NAME_LENGTH), ERROR);
-            case FULL -> setStatus(Component.translatable("gui.excavation3d.preset.full",
+            case FULL -> favoriteStatus(Component.translatable("gui.excavation3d.preset.full",
                     PresetRepository.MAX_PRESETS), ERROR);
-            case IO_ERROR -> setStatus(Component.translatable("gui.excavation3d.preset.io_error"), ERROR);
+            case IO_ERROR -> favoriteStatus(Component.translatable("gui.excavation3d.preset.io_error"), ERROR);
         }
     }
 
@@ -943,6 +998,7 @@ public final class ShapeEditorScreen extends Screen {
 
     private void cancelPointer() {
         previewGesture.cancel();
+        if (favoritesPanel != null) favoritesPanel.release();
         scrollbarDragging = false;
         setDragging(false);
         if (paintValue != null) draft.custom().endStroke();
@@ -977,7 +1033,7 @@ public final class ShapeEditorScreen extends Screen {
         if (awaitingReply) return true;
         previewGesture.reset();
         rollbackPreviewClick = null;
-        if (menu != null) {
+        if (menuOpen()) {
             // Escape closes the open menu first, not the editor.
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 closeMenu();
@@ -988,8 +1044,18 @@ public final class ShapeEditorScreen extends Screen {
                 savePreset();
                 return true;
             }
+            if (favoritesPanel != null) {
+                if (keyCode == GLFW.GLFW_KEY_TAB) {
+                    setFocused(getFocused() == presetName ? presetSave : presetName);
+                } else if (getFocused() == presetSave) {
+                    presetSave.keyPressed(keyCode, scanCode, modifiers);
+                } else {
+                    presetName.keyPressed(keyCode, scanCode, modifiers);
+                }
+                return true;
+            }
         }
-        if (menu == null && (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)) {
+        if (!menuOpen() && (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)) {
             if (getFocused() instanceof EditBox box && box.isFocused()) {
                 // Enter commits the field only. A subsequent Enter with no field focused applies.
                 setFocused(null);
@@ -1013,23 +1079,25 @@ public final class ShapeEditorScreen extends Screen {
     public boolean mouseClicked(double mx, double my, int button) {
         if (awaitingReply) return true;
         cancelPointer();
-        if (menu != null || !inPreview(mx, my)) {
+        if (menuOpen() || !inPreview(mx, my)) {
             previewGesture.reset();
             rollbackPreviewClick = null;
         }
-        if (menu != null) {
+        if (menuOpen()) {
             // The open menu takes every click; a click outside only closes it.
             if (presetName != null && presetName.mouseClicked(mx, my, button)) {
                 setFocused(presetName);
                 return true;
             }
             if (presetSave != null && presetSave.mouseClicked(mx, my, button)) {
+                setFocused(presetSave);
                 return true;
             }
-            if (button == 0 && menu.click(mx, my)) {
+            if (button == 0 && (favoritesPanel != null
+                    ? favoritesPanel.click(mx, my, Util.getMillis()) : menu.click(mx, my))) {
                 return true;
             }
-            if (!menu.contains(mx, my)) {
+            if (!menuContains(mx, my)) {
                 closeMenu();
             }
             return true;
@@ -1094,6 +1162,11 @@ public final class ShapeEditorScreen extends Screen {
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
         if (awaitingReply) return true;
+        if (favoritesPanel != null) {
+            if (button == 0 && buttonHeld(button)) favoritesPanel.drag(my);
+            else favoritesPanel.release();
+            return true;
+        }
         reconcilePointer(mx, my);
         if (!buttonHeld(button)) return false;
         if (scrollbarDragging && button == 0) {
@@ -1117,6 +1190,7 @@ public final class ShapeEditorScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
+        if (favoritesPanel != null && button == 0) favoritesPanel.release();
         if (awaitingReply) {
             cancelPointer();
             return super.mouseReleased(mx, my, button);
@@ -1170,9 +1244,10 @@ public final class ShapeEditorScreen extends Screen {
         if (awaitingReply) return true;
         previewGesture.reset();
         rollbackPreviewClick = null;
-        if (menu != null) {
-            if (menu.contains(mx, my)) {
-                menu.scroll(scrollY);
+        if (menuOpen()) {
+            if (menuContains(mx, my)) {
+                if (favoritesPanel != null) favoritesPanel.scroll(scrollY);
+                else menu.scroll(scrollY);
             } else {
                 closeMenu();
             }
@@ -1262,7 +1337,7 @@ public final class ShapeEditorScreen extends Screen {
                 net.minecraft.client.Minecraft.ON_OSX);
         graphics.fill(0, 0, width, height, 0xFF171A20);
         // Widgets under an open menu get no hover.
-        boolean overMenu = menu != null && menu.contains(mouseX, mouseY);
+        boolean overMenu = menuContains(mouseX, mouseY);
         int mx = overMenu ? -1 : mouseX;
         int my = overMenu ? -1 : mouseY;
         super.render(graphics, mx, my, partialTick);
@@ -1290,24 +1365,41 @@ public final class ShapeEditorScreen extends Screen {
 
         renderPreview(graphics, mx, my, partialTick);
         renderSummary(graphics);
-        if (menu != null) {
+        if (menuOpen()) {
             graphics.pose().pushPose();
             graphics.pose().translate(0.0F, 0.0F, 300.0F);
-            menu.render(graphics, font, mouseX, mouseY);
+            if (favoritesPanel != null) {
+                renderFavoritePreview(graphics);
+                favoritesPanel.render(graphics, font, mouseX, mouseY,
+                        overwriteName == null ? favoriteStatus
+                                : Component.translatable("gui.excavation3d.favorite.overwrite", overwriteName),
+                        overwriteName == null ? favoriteStatusColor : WARN, Util.getMillis());
+            } else menu.render(graphics, font, mouseX, mouseY);
             if (presetName != null) {
                 presetName.render(graphics, mouseX, mouseY, partialTick);
                 presetSave.render(graphics, mouseX, mouseY, partialTick);
-                if (overwriteName != null) {
-                    Component confirm = Component.translatable("gui.excavation3d.favorite.overwrite", overwriteName);
-                    float scale = Math.min(1.0F, (float) (menu.width() - 8) / Math.max(1, font.width(confirm)));
-                    graphics.pose().pushPose();
-                    graphics.pose().translate(menu.x() + 4, menu.y() + 26, 0);
-                    graphics.pose().scale(scale, scale, 1);
-                    graphics.drawString(font, confirm, 0, 0, WARN);
-                    graphics.pose().popPose();
-                }
             }
             graphics.pose().popPose();
+        }
+    }
+
+    /** At small GUI sizes the popup covers the main scene, so show the selection beside it. */
+    private void renderFavoritePreview(GuiGraphics graphics) {
+        if (favoritesPanel.x() >= (previewX0 + previewX1) / 2 + 40) return;
+        int right = favoritesPanel.x() - MARGIN;
+        if (right - MARGIN < 40) return;
+        int top = contentTop, bottom = contentBottom;
+        graphics.fill(MARGIN, top, right, bottom, 0xFF0E1116);
+        graphics.renderOutline(MARGIN, top, right - MARGIN, bottom - top, 0xFF3A3F47);
+        Component caption = Component.translatable("gui.excavation3d.preview.selection");
+        graphics.drawString(font, com.byflx.excavation3d.editor.QuickMenuLogic.fitText(
+                caption.getString(), right - MARGIN - 8, font::width), MARGIN + 4, top + 5, MUTED);
+        GeneratedShape shown = draft.type() == ShapeType.CUSTOM ? customPreview()
+                : evaluation == null ? lastValid : evaluation.shape().orElse(lastValid);
+        if (shown != null) {
+            favoritePreview.render(graphics, font, MARGIN + 1, top + font.lineHeight + 10, right - 1,
+                    bottom - 1, shown, camera, false, draft.type() == ShapeType.CUSTOM, layer,
+                    -1, -1, false, false);
         }
     }
 

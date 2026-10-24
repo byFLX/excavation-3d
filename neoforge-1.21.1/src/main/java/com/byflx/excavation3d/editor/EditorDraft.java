@@ -165,6 +165,24 @@ public final class EditorDraft {
         return draft;
     }
 
+    /** Loads a favorite atomically, retaining history and the other types' draft values. */
+    public void loadFavorite(ShapeConfig config) {
+        EditorDraft loaded = fromConfig(config);
+        custom.endStroke();
+        recordChange();
+        type = loaded.type;
+        texts.get(type).clear();
+        texts.get(type).putAll(loaded.texts.get(type));
+        if (type == ShapeType.STAIR) stairAscending = loaded.stairAscending;
+        if (type == ShapeType.CORRIDOR) corridorUpward = loaded.corridorUpward;
+        if (type == ShapeType.CUSTOM) {
+            custom = loaded.custom;
+            transform = loaded.transform;
+            customOrientation = loaded.customOrientation;
+        }
+        watchCustom();
+    }
+
     /** The numeric fields of {@code type}, in display order. */
     public static List<String> fields(ShapeType type) {
         return switch (type) {
