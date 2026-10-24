@@ -4,6 +4,53 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ToolHintStateTest {
+    @Test void switchingToolsDuringTheItemNameStartsTheOrdinaryHintOnlyAfterItDisappears() {
+        var hint = new ToolHintState();
+        hint.update(0, true, "first", "A", false, false, true, 40);
+        hint.update(1500, true, "second", "B", false, false, true, 40);
+        hint.update(3000, true, "second", "B", false, false, true, 1);
+        assertEquals(0, hint.opacity(3000));
+        hint.update(4000, true, "second", "B", false, false, true, 0);
+        assertEquals(1, hint.opacity(6500));
+        assertEquals(0.5, hint.opacity(6750));
+        assertEquals(0, hint.opacity(7000));
+    }
+
+    @Test void itemNameDefersTheFullLifetimeIncludingShiftAndQueuedFeedback() {
+        for (boolean shift : new boolean[] {false, true}) {
+            var hint = new ToolHintState();
+            hint.update(0, true, "tool", "shape", false, shift, true, 40);
+            assertEquals(0, hint.opacity(0));
+            hint.showFeedback("Preview off");
+            hint.update(10000, true, "tool", "shape", false, shift, true, 1);
+            assertEquals(0, hint.opacity(10000));
+            assertNull(hint.feedback(10000));
+            hint.update(11000, true, "tool", "shape", false, shift, true, 0);
+            assertEquals("Preview off", hint.feedback(13500));
+            assertEquals(1, hint.opacity(13500));
+            assertEquals(0.5, hint.opacity(13750));
+            assertNull(hint.feedback(14000));
+            assertEquals(shift ? 1 : 0, hint.opacity(14000));
+        }
+    }
+
+    @Test void itemNamePausesAnExistingHintAndResumesItsRemainingFade() {
+        var hint = new ToolHintState();
+        update(hint, 0, "tool", "shape", false, false);
+        hint.update(2600, true, "tool", "shape", false, false, true, 40);
+        assertEquals(0, hint.opacity(2600));
+        hint.update(10000, true, "tool", "shape", false, false, true, 1);
+        assertEquals(0, hint.opacity(10000));
+        hint.update(11000, true, "tool", "shape", false, false, true, 0);
+        assertEquals(0.8, hint.opacity(11000), 0.0001);
+        assertEquals(0.5, hint.opacity(11150), 0.0001);
+        assertEquals(0, hint.opacity(11400));
+        // An already expired hint must never revive after another item-name highlight.
+        hint.update(12000, true, "tool", "shape", false, false, true, 40);
+        hint.update(20000, true, "tool", "shape", false, false, true, 0);
+        assertEquals(0, hint.opacity(20000));
+    }
+
     @Test void feedbackReplacesTheHintAndUsesItsFadeEvenWhileShiftIsHeld() {
         var hint = new ToolHintState();
         update(hint, 0, "tool", "shape", false, true);
@@ -25,8 +72,8 @@ class ToolHintStateTest {
         var hint = new ToolHintState();
         update(hint, 0, "tool", "shape", false, false);
         hint.showFeedback("Preview off");
-        hint.update(4000, true, "tool", "shape", false, false, false);
-        hint.update(20000, true, "tool", "shape", false, false, true);
+        hint.update(4000, true, "tool", "shape", false, false, false, 0);
+        hint.update(20000, true, "tool", "shape", false, false, true, 0);
         assertEquals("Preview off", hint.feedback(22500));
         assertEquals(0.5, hint.opacity(22750));
         update(hint, 23000, "other", "shape", false, false);
@@ -34,7 +81,7 @@ class ToolHintStateTest {
     }
 
     private static void update(ToolHintState hint, long now, String tool, String shape, boolean bypass, boolean shift) {
-        hint.update(now, tool != null, tool, shape, bypass, shift, true);
+        hint.update(now, tool != null, tool, shape, bypass, shift, true, 0);
     }
 
     @Test void showsForTwoAndAHalfSecondsThenFadesForHalfASecondWithoutIdleRefresh() {
@@ -83,9 +130,9 @@ class ToolHintStateTest {
         var hint = new ToolHintState();
         update(hint, 0, "tool", "shape", false, false);
         hint.confirmedChange();
-        hint.update(4000, true, "tool", "shape", false, false, false);
+        hint.update(4000, true, "tool", "shape", false, false, false, 0);
         assertEquals(0, hint.opacity(4000));
-        hint.update(20000, true, "tool", "shape", false, false, true);
+        hint.update(20000, true, "tool", "shape", false, false, true, 0);
         assertEquals(1, hint.opacity(22500));
         assertEquals(0.5, hint.opacity(22750));
         hint.confirmedChange();
@@ -96,7 +143,7 @@ class ToolHintStateTest {
         assertEquals(0, hint.opacity(25000));
     }
 
-    @Test void hintSitsDirectlyAboveTheHeartsAndBelowItemNamesAndTheActionBar() {
+    @Test void hintKeepsItsLowPositionDirectlyAboveTheHearts() {
         for (int height : new int[] {240, 360, 1080}) {
             for (int left : new int[] {39, 49, 59, 100}) {
                 for (int right : new int[] {39, 59, 90}) {
@@ -107,7 +154,7 @@ class ToolHintStateTest {
                 }
             }
         }
-        // Survival default stack: the hint ends 41 px above the bottom, below vanilla's item name (59) and action bar (68).
+        // Item-name overlap is prevented by deferral, rather than by moving this bottom edge.
         assertTrue(1080 - ToolHintState.bottom(1080, 39, 39) < 59);
     }
 }

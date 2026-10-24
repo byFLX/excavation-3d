@@ -72,6 +72,35 @@ public final class EditorDraft {
 
     public enum PreviewEdit { CHANGED, UNCHANGED, INVALID, LIMIT }
 
+    /** Call immediately before a preview click; use only if that click becomes a view reset. */
+    public Runnable previewRollback() {
+        ShapeType previousType = type;
+        Map<ShapeType, Map<String, String>> previousTexts = new EnumMap<>(ShapeType.class);
+        texts.forEach((key, value) -> previousTexts.put(key, Map.copyOf(value)));
+        boolean ascending = stairAscending, upward = corridorUpward;
+        ShapeTransform previousTransform = transform, previousRedoTransform = redoTransform;
+        CustomMaskDraft previousCustom = custom;
+        Runnable restoreCustom = custom.previewRollback();
+        Map<CustomMaskDraft, PreviewConversion> conversions = new LinkedHashMap<>(previewConversions);
+        PreviewConversion previousRedo = previewRedo;
+        return () -> {
+            type = previousType;
+            previousTexts.forEach((key, value) -> {
+                texts.get(key).clear();
+                texts.get(key).putAll(value);
+            });
+            stairAscending = ascending;
+            corridorUpward = upward;
+            transform = previousTransform;
+            redoTransform = previousRedoTransform;
+            custom = previousCustom;
+            restoreCustom.run();
+            previewConversions.clear();
+            previewConversions.putAll(conversions);
+            previewRedo = previousRedo;
+        };
+    }
+
     private EditorDraft() {
         for (ShapeType t : ShapeType.values()) {
             texts.put(t, new HashMap<>());

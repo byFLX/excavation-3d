@@ -33,12 +33,12 @@ public final class ToolHud {
         Object tool = eligible ? new HeldTool(mc.player.getInventory().selected, mc.player.getMainHandItem().getItem()) : null;
         Object shape = data == null ? null : new ShapeState(data.config().orElse(null), data.enabled());
         state.update(Util.getMillis(), eligible, tool, shape, ClientState.bypassActive(), Screen.hasShiftDown(),
-                mc.screen == null && !mc.options.hideGui);
+                mc.screen == null && !mc.options.hideGui, mc.gui.toolHighlightTimer);
     }
 
     static void onRenderGui(RenderGuiEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.options.hideGui || mc.screen != null
+        if (mc.player == null || mc.options.hideGui || mc.screen != null || mc.gui.toolHighlightTimer > 0
                 || !mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) return;
         int opacity = (int) Math.round(state.opacity(Util.getMillis()) * 255);
         if (opacity < 4) return; // Minecraft treats tiny text alpha values as opaque.

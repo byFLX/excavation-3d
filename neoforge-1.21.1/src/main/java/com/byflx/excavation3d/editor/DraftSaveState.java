@@ -24,6 +24,13 @@ public final class DraftSaveState {
         return generation;
     }
 
+    /** Retracts a speculative click only while it is still the latest, unconfirmed change. */
+    public boolean rollbackEdit(long before, long after) {
+        if (generation != after || savedGeneration > before || before > after) return false;
+        generation = before;
+        return true;
+    }
+
     /**
      * The server confirmed the draft as it was at {@code submitted}.
      *

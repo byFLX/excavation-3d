@@ -3,10 +3,31 @@
 Maps every acceptance test of [plan §12](EXCAVATION_3D_PLAN.md#12-verbindliche-abnahmetests) to its evidence.
 
 - **Automated** – a JUnit test in `neoforge-1.21.1/src/test/java` (run by `./gradlew test build`).
-- **Game Test – not run yet** – a Game Test in `neoforge-1.21.1/src/main/java/com/byflx/excavation3d/gametest/ExcavationGameTests.java`, run by `./gradlew runGameTestServer`. The build gate (`test build`) only compiles these tests; it does not run them.
+- **Game Test** – a world-level test in `neoforge-1.21.1/src/main/java/com/byflx/excavation3d/gametest/ExcavationGameTests.java`. Round 7 recorded 15/15 passed; older “not run yet” labels below are historical. `./gradlew runGameTestServer` is the normal operator command; the build gate (`test build`) only compiles these tests. This pass did not run GameTests.
 - **In game – open** – needs a client, a dedicated server or two players. Not run yet. A passing build does not replace these checks (plan §12, last paragraph).
 
 Test paths are relative to `neoforge-1.21.1/src/test/java/com/byflx/excavation3d/`. Game Test names are methods of `gametest/ExcavationGameTests`.
+
+## Current acceptance: editor v2, final review (2026-10-24)
+
+This table and the [current plan](EXCAVATION_3D_PLAN.md#current-behaviour-editor-v2-final-review-2026-10-24) supersede conflicting requirements and stale evidence below. Earlier rounds remain as history, including references to removed classes, text-entry sizes, Apply/Cancel, Remove shape, Last shape, alphabetical wheel order, axis labels, camera presets, schematic views, per-tool world preview and completion messages. Unchanged geometry/server-safety checks remain relevant. Historical “Game Tests not run yet” statuses were superseded by round 7's 15/15 result; this final-review pass runs pure tests only.
+
+| Current requirement | Evidence | Remaining in-game check |
+|---|---|---|
+| Done applies/enables and closes after confirmation; Escape discards with confirmation; no separate Apply/Cancel/Remove shape/Last shape UI | `ShapeEditorScreen.initBottom`, `keyPressed`, `onClose`; `DraftSaveStateTest`, `ApplyAvailabilityTest` | Done, Enter, Escape, rejection and dirty draft handling |
+| Size rows have no text entry; wheel steps only over value/buttons (1 or Shift 5); labels/other panel areas scroll; scrollbar drags | `SizeRowStep.hit/next`, `SizeRowStepTest`; `PanelScroll`, `PanelScrollTest`; screen click/drag/release and wheel routing | At 320 × 240 select Corridor, scroll labels to Direction, drag scrollbar to both ends, test clipped rows and GUI scales |
+| Preview edits in every mode; successful template edits convert to Custom; ordinary Undo restores the exact template | `EditorDraft.editTemplatePreview`, `TemplatePreviewEditTest`; `CustomCanvasTest`, `PreviewPickingTest` | Add/remove, rejection, growth on each side, notice, Undo/Redo, all templates/transforms |
+| Single clicks edit immediately; left double-click resets only, restoring its first edit/conversion and prior history without new redo or dirty state | `EditorDraft.previewRollback`, `CustomMaskDraft.previewRollback`, `DraftSaveState.rollbackEdit`; `PreviewResetTest`, `PreviewGestureTest`; screen release handler | Double-click cube/ghost on templates and Custom; verify type/shape, discard prompt and Undo/Redo, including existing history |
+| Left drag rotates at 4 pixels; right drag cancels without rotation/editing; wheel zooms; no axis labels, camera presets or schematic view; Rotate/Mirror Custom-only | `PreviewGestureTest`, `TemplatePreviewEditTest`; `ShapeEditorScreen.initPreviewButtons`, `mouseDragged`, renderer dimensions/count line | Both buttons, reset, zoom, hover, transformed Custom and small windows |
+| Off pauses through enabled flag and preserves shape; On resumes; selecting a favorite enables | `ToolShapeData.enabled`, `QuickShapeAction`, `QuickMenuLogicTest`; no Remove/Last UI | Pause/resume, tool swap, relog and single-block mining while paused |
+| Wheel and shortcuts use saved order with Off/On pinned; defaults seed once and remain deletable | `PresetRepository`, `BuiltInShapesTest`, `PresetRepositoryTest`, `PresetShortcutsTest`, `QuickMenuLogicTest` | Fresh/legacy files, order, overwrite, right-click deletion, restart after deleting defaults and empty wheel |
+| World preview is a persisted client preference; legacy per-tool flag ignored | `ClientConfig.worldPreview`, `QuickShapeAction.toggleWorldPreview`, `WorldPreview` | Toggle, relog, tool swap; no editor preview checkbox |
+| Normal completion stays silent, including skips; interruption reasons retained | `ExcavationService.finish`, immutable server `FinishedEvent`; round 7 GameTest evidence below | Clean/mixed/protected selections: no normal result message |
+| Low hint waits behind item name; 2.5 s display + 0.5 s fade starts on visibility and pauses during later highlights | `ToolHud` reads `Gui.toolHighlightTimer` through `META-INF/accesstransformer.cfg`; `ToolHintStateTest`: initial deferral, queued feedback, Shift, resumed fade and no revival | Switch/rename tools, wheel/shortcuts, success/failure feedback and Shift: no overlap, full visible lifetime |
+
+Validation: all 83 production sources compile with Java 21 `javac --release 21` against cached dependencies. NeoForge's access-transformer engine successfully applies the actual new config to the cached `Gui` class, confirming the public integer field used by the compiled HUD. All **167 pure JUnit tests pass**, with only JUnit and project classes on the test runtime classpath (no Minecraft/NeoForge libraries). Evidence: `neoforge-1.21.1/build/final-review-checks/` (`verify.py`, argument files and logs). No Gradle, GameTest or in-game launch, commit, branch switch or deletion occurred. No source files need deletion; that ignored verification directory is optional operator cleanup.
+
+## Historical acceptance evidence (superseded where noted above)
 
 ## Eligible tools (plan §2a, correction 2026-10-22)
 
@@ -128,7 +149,7 @@ Visual and multiplayer checks remain open; the automated GameTest result is reco
 1. Dedicated server start (`./gradlew runServer`) with the mod, joining with a client: no client class loading on the server.
 2. Two clients on one server: independent tools, parallel excavation, budget.
 3. A claim/protection mod: protected blocks are skipped; normal completion stays silent (round 6).
-4. GUI scale 1–4 and small windows: no overlap (type icons, preview icons and captions, dimension labels, Presets menu, summary and checkbox, Cancel/Apply), scrolling parameter area, draft kept.
+4. GUI scale 1–4 and small windows: no overlap among type icons, Custom transform icons, preview captions, dimensions/count line, Save as favorite, summary and Done. Scroll via labels/unused panel areas and the draggable scrollbar; at 320 × 240 Corridor, Direction is reachable and the draft is kept. Supersedes the old dimension-label, checkbox and Cancel/Apply check.
 5. Renderer and camera mods: with Sodium + Iris (shaders off, then a shader pack on), ShoulderSurfing and Freecam, the world preview's contour, fill and yellow start block stay on the targeted blocks while looking around and walking, and the editor preview stays visible.
 6. Game Tests (plan §12, last paragraph): **15/15 passed in round 7**, launched directly with Java 21 and the cached NeoForge runtime, without Gradle. Includes all original 13 cases and both new pickaxe/planks regressions. Unloaded chunks and a block that refuses its removal still require other coverage. A normal Gradle `runGameTestServer` run is available to the operator but was not invoked here.
-7. Plan §2a in a client (survival): an iron pickaxe, a shovel and an axe each get a shape via `V` and mine it once; a tool without a shape mines a single block and shows "Off" in its tooltip/HUD; "Remove shape" makes a tool mine single blocks again. Run the editor v2 checks above as well.
+7. Plan §2a in a client (survival): an iron pickaxe, a shovel and an axe each get a shape via `V` and mine it once; a tool without a shape mines a single block and shows "Off" in its tooltip/HUD; Off pauses the stored shape and mines single blocks, and On resumes the same shape. The old Remove shape check is superseded. Run the editor v2 checks above as well.

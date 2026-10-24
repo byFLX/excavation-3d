@@ -59,6 +59,20 @@ public final class CustomMaskDraft {
         return new CustomMaskDraft(mask.width(), mask.height(), mask.depth(), mask.toBitSet(), mask.anchor());
     }
 
+    /** Restores a speculative preview click, including history displaced at the undo limit. */
+    Runnable previewRollback() {
+        Snapshot before = snapshot();
+        Deque<Snapshot> previousUndo = new ArrayDeque<>(undo);
+        Deque<Snapshot> previousRedo = new ArrayDeque<>(redo);
+        return () -> {
+            restore(before);
+            undo.clear();
+            undo.addAll(previousUndo);
+            redo.clear();
+            redo.addAll(previousRedo);
+        };
+    }
+
     public int width() {
         return width;
     }

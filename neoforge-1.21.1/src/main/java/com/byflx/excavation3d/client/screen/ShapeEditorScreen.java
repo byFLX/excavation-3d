@@ -8,6 +8,7 @@ import com.byflx.excavation3d.editor.ApplyAvailability;
 import com.byflx.excavation3d.editor.DraftSaveState;
 import com.byflx.excavation3d.editor.EditorDraft;
 import com.byflx.excavation3d.editor.EditorLayout;
+import com.byflx.excavation3d.editor.PanelScroll;
 import com.byflx.excavation3d.editor.SessionHandshake;
 import com.byflx.excavation3d.editor.SizeRowStep;
 import com.byflx.excavation3d.net.ApplyResultPayload;
@@ -81,6 +82,9 @@ public final class ShapeEditorScreen extends Screen {
     private final ShapePreviewRenderer preview = new ShapePreviewRenderer();
     private final PreviewGesture previewGesture = new PreviewGesture();
     private boolean preservePreviewClick;
+    private Runnable rollbackPreviewClick;
+    private boolean scrollbarDragging;
+    private double scrollbarGrab;
     private Component previewNotice;
     private long previewNoticeUntil;
 
@@ -167,7 +171,10 @@ public final class ShapeEditorScreen extends Screen {
     @Override
     protected void init() {
         cancelPointer();
-        if (!preservePreviewClick) previewGesture.reset();
+        if (!preservePreviewClick) {
+            previewGesture.reset();
+            rollbackPreviewClick = null;
+        }
         scrolledWidgets.clear();
         stepButtons.clear();
         previewWidgets.clear();
@@ -452,6 +459,10 @@ public final class ShapeEditorScreen extends Screen {
 
     private int maxScroll() {
         return Math.max(0, contentHeight - (contentBottom - contentTop));
+    }
+
+    private PanelScroll scrollbar() {
+        return new PanelScroll(contentTop, contentBottom, maxScroll());
     }
 
     private void applyScroll() {
@@ -910,7 +921,8 @@ public final class ShapeEditorScreen extends Screen {
 
     private void endStalePointer() {
         boolean previewEnded = previewGesture.endIfReleased(buttonHeld(previewGesture.button()));
-        if (!minecraft.isWindowActive() || previewEnded || (paintButton >= 0 && !buttonHeld(paintButton))) {
+        if (!minecraft.isWindowActive() || previewEnded || (paintButton >= 0 && !buttonHeld(paintButton))
+                || (scrollbarDragging && !buttonHeld(0))) {
             cancelPointer();
             previewGesture.reset();
         } else if (isDragging() && !buttonHeld(0)) {
@@ -929,6 +941,7 @@ public final class ShapeEditorScreen extends Screen {
 
     private void cancelPointer() {
         previewGesture.cancel();
+        scrollbarDragging = false;
         setDragging(false);
         if (paintValue != null) draft.custom().endStroke();
         paintValue = null;
@@ -960,6 +973,8 @@ public final class ShapeEditorScreen extends Screen {
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (awaitingReply) return true;
+        previewGesture.reset();
+        rollbackPreviewClick = null;
         if (menu != null) {
             // Escape closes the open menu first, not the editor.
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
@@ -996,7 +1011,10 @@ public final class ShapeEditorScreen extends Screen {
     public boolean mouseClicked(double mx, double my, int button) {
         if (awaitingReply) return true;
         cancelPointer();
-        if (menu != null || !inPreview(mx, my)) previewGesture.reset();
+        if (menu != null || !inPreview(mx, my)) {
+            previewGesture.reset();
+            rollbackPreviewClick = null;
+        }
         if (menu != null) {
             // The open menu takes every click; a click outside only closes it.
             if (presetName != null && presetName.mouseClicked(mx, my, button)) {
@@ -1012,6 +1030,18 @@ public final class ShapeEditorScreen extends Screen {
             if (!menu.contains(mx, my)) {
                 closeMenu();
             }
+            return true;
+        }
+        if (button == 0 && maxScroll() > 0 && mx >= leftX + leftW + 1 && mx < leftX + leftW + 7
+                && my >= contentTop && my < contentBottom) {
+            PanelScroll bar = scrollbar();
+            int thumbY = bar.thumbY(scroll);
+            scrollbarGrab = my >= thumbY && my < thumbY + bar.thumbHeight()
+                    ? my - thumbY : bar.thumbHeight() / 2.0;
+            scrollbarDragging = true;
+            setFocused(null);
+            scroll = bar.dragged(my, scrollbarGrab);
+            applyScroll();
             return true;
         }
         // Dispatch every +/- press directly, before fields or widget double-click handling.
@@ -1064,6 +1094,11 @@ public final class ShapeEditorScreen extends Screen {
         if (awaitingReply) return true;
         reconcilePointer(mx, my);
         if (!buttonHeld(button)) return false;
+        if (scrollbarDragging && button == 0) {
+            scroll = scrollbar().dragged(my, scrollbarGrab);
+            applyScroll();
+            return true;
+        }
         PreviewGesture.Motion motion = previewGesture.drag(button, mx, my, dx, dy,
                 buttonHeld(previewGesture.button()));
         if (motion.consumed()) {
@@ -1087,19 +1122,52 @@ public final class ShapeEditorScreen extends Screen {
         PreviewGesture.Release released = previewGesture.release(button, mx, my, inPreview(mx, my), Util.getMillis());
         // Always let Screen clear its widget drag too, including releases outside the panel.
         boolean widgetReleased = super.mouseReleased(mx, my, button);
+        boolean scrollbarReleased = scrollbarDragging && button == 0;
+        if (scrollbarReleased) scrollbarDragging = false;
         if (paintValue != null && button == paintButton) cancelPointer();
         if (released == PreviewGesture.Release.RESET) {
+            Runnable rollback = rollbackPreviewClick;
+            rollbackPreviewClick = null;
+            if (rollback != null) rollback.run();
             camera.reset();
             preview.resetScale();
         } else if (released == PreviewGesture.Release.CLICK) {
+            Runnable restoreDraft = button == 0 ? draft.previewRollback() : null;
+            long before = saveState.submit();
+            int previousLayer = layer, previousScroll = scroll, previousStatusColor = statusColor;
+            boolean previousAnchorMode = anchorMode, previousSizeEdited = sizeEdited;
+            GeneratedShape previousLastValid = lastValid;
+            CustomMaskDraft.ResizeCheck previousResize = pendingResize;
+            Component previousNotice = previewNotice, previousStatus = status;
+            long previousNoticeUntil = previewNoticeUntil;
             editPreview(mx, my, button);
+            long after = saveState.submit();
+            rollbackPreviewClick = restoreDraft == null ? null : () -> {
+                if (!saveState.rollbackEdit(before, after)) return;
+                restoreDraft.run();
+                layer = previousLayer;
+                scroll = previousScroll;
+                anchorMode = previousAnchorMode;
+                pendingResize = previousResize;
+                previewNotice = previousNotice;
+                previewNoticeUntil = previousNoticeUntil;
+                status = previousStatus;
+                statusColor = previousStatusColor;
+                lastValid = previousLastValid;
+                sizeEdited = previousSizeEdited;
+                rebuildWidgets();
+            };
+        } else if (released == PreviewGesture.Release.DRAG) {
+            rollbackPreviewClick = null;
         }
-        return released != PreviewGesture.Release.NONE || widgetReleased;
+        return released != PreviewGesture.Release.NONE || widgetReleased || scrollbarReleased;
     }
 
     @Override
     public boolean mouseScrolled(double mx, double my, double scrollX, double scrollY) {
         if (awaitingReply) return true;
+        previewGesture.reset();
+        rollbackPreviewClick = null;
         if (menu != null) {
             if (menu.contains(mx, my)) {
                 menu.scroll(scrollY);
@@ -1115,13 +1183,14 @@ public final class ShapeEditorScreen extends Screen {
         if (mx >= leftX && mx < leftX + leftW && my >= contentTop && my < contentBottom) {
             for (SizeRow row : sizeRows) {
                 int y = row.y() - scroll;
-                if (my >= y && my < y + ROW + font.lineHeight + 2) {
+                int controlsLeft = row.valueX() - FIELD_WIDTH / 2 - 2 - STEP_WIDTH;
+                if (SizeRowStep.hit(mx, my, controlsLeft, leftX + leftW, y, contentTop, contentBottom)) {
                     if (scrollY != 0) step(row.field(), (int) Math.signum(scrollY));
                     return true;
                 }
             }
         }
-        if (mx >= leftX && mx < leftX + leftW && my >= contentTop && my < contentBottom && maxScroll() > 0) {
+        if (mx >= leftX && mx < leftX + leftW + 7 && my >= contentTop && my < contentBottom && maxScroll() > 0) {
             scroll = Mth.clamp(scroll - (int) Math.round(scrollY * ROW), 0, maxScroll());
             applyScroll();
             return true;
@@ -1211,11 +1280,10 @@ public final class ShapeEditorScreen extends Screen {
         renderGrid(graphics, mx, my);
         graphics.disableScissor();
         if (maxScroll() > 0) {
-            int track = contentBottom - contentTop;
-            int thumb = Math.max(10, track * track / (track + maxScroll()));
-            int thumbY = contentTop + (track - thumb) * scroll / maxScroll();
-            graphics.fill(leftX + leftW + 2, contentTop, leftX + leftW + 3, contentBottom, 0x183F4B59);
-            graphics.fill(leftX + leftW + 2, thumbY, leftX + leftW + 3, thumbY + thumb, 0x886B7888);
+            PanelScroll bar = scrollbar();
+            int thumbY = bar.thumbY(scroll);
+            graphics.fill(leftX + leftW + 2, contentTop, leftX + leftW + 6, contentBottom, 0x183F4B59);
+            graphics.fill(leftX + leftW + 2, thumbY, leftX + leftW + 6, thumbY + bar.thumbHeight(), 0x886B7888);
         }
 
         renderPreview(graphics, mx, my, partialTick);

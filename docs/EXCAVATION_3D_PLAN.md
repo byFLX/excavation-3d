@@ -1,4 +1,25 @@
-# Entwicklungsplan: Excavation 3D
+# Excavation 3D: current plan
+
+## Current behaviour (editor v2, final review, 2026-10-24)
+
+This section is authoritative. The original plan below is preserved as historical design intent. Requirements superseded here are no longer release requirements; unchanged geometry, server validation, mining safety and integration checks still apply. Evidence and remaining checks are in [the acceptance matrix](ACCEPTANCE_MATRIX.md#current-acceptance-editor-v2-final-review-2026-10-24).
+
+- **Done-only editor:** tap V with an eligible tool to open a local draft. Done (or unfocused Enter) applies and enables the shape and closes only after server confirmation. Rejections stay visible. Escape closes without applying and asks before discarding changes. Separate Apply, Cancel, Remove shape, Last shape and Apply-and-preview actions are superseded.
+- **Size rows:** displayed values with −/+ buttons, no size text entry. Click or wheel over the value/buttons steps by 1, or 5 with Shift, clamped to the server axis range. Labels, validation text and other left-panel areas scroll the panel. The scrollbar supports dragging and track clicks; Direction must remain reachable at 320 × 240 with Corridor. Invalid/oversized shapes show errors and disable Done. Keyboard-only size entry is superseded; the layer number and favorite name retain text entry.
+- **Editable preview in every mode:** left-click a selected face to add a neighbour, or a ghost/floor cell to add it; right-click removes a selected cube. The start block is protected. The first successful Box/Plus/Stairs/Corridor preview edit converts to Custom, with a brief notice and one Undo restoring the exact template/settings. Rejected edits never convert. The canvas grows on needed sides within limits. Redo can reapply an ordinary undone conversion.
+- **Camera:** left-drag at least 4 GUI pixels to rotate; right-drag cancels the click without editing or rotating. Wheel zooms. A left double-click resets the view and rolls back its first click's immediate edit, conversion, dirty state and history changes, preserving earlier undo/redo and creating no new redo entry. Single clicks remain immediate. Axis labels/dimension leaders, camera presets/reset buttons and schematic/result views are superseded; one line shows dimensions and block count. Rotate/Mirror controls are Custom-only.
+- **Custom:** layer navigation, Layer tools, Set start, Undo/Redo and the 2D layer grid remain. Resize growth adds empty cells; shrinking selected cells requires confirmation, and losing the start is refused. Stairs/Corridor retain their Direction row.
+- **Off is pause:** the tool's enabled flag becomes false while its stored shape stays intact; On resumes it. Selecting a favorite or Done enables it. No Remove shape or Last shape UI exists. Shift remains temporary single-block mining. Tools without shapes remain ordinary tools and show Off.
+- **Favorites and wheel:** hold V for 250 ms for the wheel. Off/On is pinned first on every page; favorites follow saved order. New names append and overwrites keep their slots. Legacy Excavation 3D preset files without an order array initialize existing entries alphabetically once. Tunnel 1×2, Tunnel 3×3, Floor 5×5 and Stairs seed once as ordinary deletable favorites using `defaultsSeeded`; deleting them never reseeds them. Two right-clicks on the same segment delete; moving away cancels. No alphabetical runtime sorting or Last shape entry. The gold marker identifies Off when paused, otherwise the first matching favorite in saved order.
+- **World preview is a client setting:** `worldPreview` in `config/excavation3d-client.toml`, saved immediately by its optional shortcut. Legacy per-tool preview flags are ignored. The editor has no preview checkbox or apply-and-preview mode.
+- **Quiet feedback:** normal excavation completion is silent, including skipped blocks. Skip counts/reasons remain available to server observation/tests; interruptions retain reason messages. The low tool hint keeps its position, never draws while `Gui.toolHighlightTimer > 0`, and starts its 2.5 s display plus 0.5 s fade when visible. Later item-name highlights pause its remaining lifetime, including feedback; Shift details also wait behind the item name.
+- The pre-release `shapeexcavator` ids/config/preset files are intentionally not migrated; the mod was never published under that name.
+
+## Superseded baseline: original plan retained for history
+
+The original headings and wording below are historical where they conflict with the current behaviour above. In particular, §§1–5, 6.5, 8–9 and 11–13 contain superseded UI/feedback requirements, and §2a's Remove shape requirement is superseded by pause/resume. Read their old acceptance wording using the replacements above, rather than as additional missing features.
+
+# Entwicklungsplan: Excavation 3D (historical)
 
 **Zielplattform:** Minecraft 1.21.1 / NeoForge 21.1.x  
 **Status:** Etappen 1–5 umgesetzt (Lauf #25, 335b569). Korrektur 2026-10-22: Die Form hängt an normalen Werkzeugen, es gibt kein eigenes Item (siehe Abschnitt 2a).  
