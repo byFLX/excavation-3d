@@ -30,15 +30,17 @@ public final class QuickShapeAction {
     private final ShapeConfig config;
     private final ToolShapeData previous;
     private final String presetName;
+    private final Boolean enabledTarget;
     private int replyTicks;
     private boolean submitted;
 
-    private QuickShapeAction(Minecraft mc, ShapeConfig config, String presetName) {
+    private QuickShapeAction(Minecraft mc, ShapeConfig config, String presetName, Boolean enabledTarget) {
         slot = mc.player.getInventory().selected;
         stack = mc.player.getMainHandItem();
         previous = stack.get(ModComponents.TOOL_SHAPE.get());
         this.config = config;
         this.presetName = presetName;
+        this.enabledTarget = enabledTarget;
     }
 
     public static boolean busy() { return pending != null; }
@@ -73,14 +75,24 @@ public final class QuickShapeAction {
     }
 
     private static void start(ShapeConfig config, String presetName) {
+        start(config, presetName, null);
+    }
+
+    /** Wheel Off/Resume are idempotent; the separate toggle binding still uses start(null). */
+    public static void setEnabled(boolean enabled) {
+        start(null, null, enabled);
+    }
+
+    private static void start(ShapeConfig config, String presetName, Boolean enabledTarget) {
         Minecraft mc = Minecraft.getInstance();
         if (busy() || mc.screen != null || mc.player == null || mc.getConnection() == null
                 || !mc.player.getMainHandItem().is(ModTags.SHAPE_TOOLS)) return;
         if (config == null) {
             ToolShapeData data = ModTags.shapeOf(mc.player.getMainHandItem());
             if (data == null || data.config().isEmpty()) return;
+            if (enabledTarget != null && data.enabled() == enabledTarget) return;
         }
-        pending = new QuickShapeAction(mc, config, presetName);
+        pending = new QuickShapeAction(mc, config, presetName, enabledTarget);
         PacketDistributor.sendToServer(new BeginEditPayload(pending.handshake.start(), pending.slot));
     }
 
@@ -124,7 +136,7 @@ public final class QuickShapeAction {
         pending.submitted = true;
         if (pending.config == null) {
             PacketDistributor.sendToServer(new SetShapeEnabledPayload(payload.sessionId(), pending.slot,
-                    payload.revision(), !pending.previous.enabled()));
+                    payload.revision(), pending.enabledTarget != null ? pending.enabledTarget : !pending.previous.enabled()));
         } else PacketDistributor.sendToServer(new ApplyShapePayload(payload.sessionId(), pending.slot, payload.revision(),
                     pending.config));
     }

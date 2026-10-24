@@ -42,14 +42,22 @@ public final class QuickMenuLogic {
     public record Layout(double centerX, double centerY, double radius, double deadZone, int count, int page) {
         public int pages() { return Math.max(1, (count - 1 + PAGE_SIZE - 2) / (PAGE_SIZE - 1)); }
         public int offset() { return page * (PAGE_SIZE - 1); }
-        /** Off/On is pinned to the top on every page. */
+        /** Off is pinned to the top on every page. */
         public int index(int segment) { return segment == 0 ? 0 : offset() + segment; }
         public int segments() { return Math.max(0, Math.min(PAGE_SIZE, count - offset())); }
         public double angle(int segment) { return -Math.PI / 2 + segment * Math.PI * 2 / segments(); }
-        public double labelRadius() { return deadZone + (radius - deadZone) * 0.5; }
+        public double labelRadius() {
+            // The area centroid of a half annulus sits inward from the radial midpoint.
+            if (segments() == 2) return 4 * (radius * radius * radius - deadZone * deadZone * deadZone)
+                    / (3 * Math.PI * (radius * radius - deadZone * deadZone));
+            return deadZone + (radius - deadZone) * 0.5;
+        }
         public double scale() { return radius / 88.0; }
         public double labelX(int segment) { return centerX + Math.cos(angle(segment)) * labelRadius(); }
         public double labelY(int segment) { return centerY + Math.sin(angle(segment)) * labelRadius(); }
+        /** Two halves use a horizontal icon/name row centred on the half's area centroid. */
+        public double labelTop() { return segments() == 2 ? -7 : 7; }
+        public double labelBottom() { return segments() == 2 ? 7 : 15; }
         public double shortcutX(int segment) {
             return centerX + Math.cos(angle(segment)) * (radius - 5 * scale());
         }
@@ -62,11 +70,11 @@ public final class QuickMenuLogic {
             for (int width = 100; width > 0; width--) {
                 // Reserve the full 10 x 6 shortcut box plus a two-pixel margin on each side.
                 if (Math.abs(labelX(segment) - shortcutX(segment)) < (width / 2.0 + 7) * scale
-                        && labelY(segment) + 15 * scale > shortcutY(segment) - 2 * scale
-                        && labelY(segment) + 7 * scale < shortcutY(segment) + 8 * scale) continue;
+                        && labelY(segment) + labelBottom() * scale > shortcutY(segment) - 2 * scale
+                        && labelY(segment) + labelTop() * scale < shortcutY(segment) + 8 * scale) continue;
                 boolean fits = true;
                 for (int side : new int[] {-1, 1}) {
-                    for (int y : new int[] {7, 15}) {
+                    for (double y : new double[] {labelTop(), labelBottom()}) {
                         double dx = labelX(segment) - centerX + side * width * scale / 2;
                         double dy = labelY(segment) - centerY + y * scale;
                         double distance = Math.hypot(dx, dy);
@@ -80,8 +88,8 @@ public final class QuickMenuLogic {
                 }
                 // The nearest point of a horizontal rectangle can lie between its corners.
                 double nearX = Math.max(0, Math.abs(labelX(segment) - centerX) - width * scale / 2);
-                double top = labelY(segment) - centerY + 7 * scale;
-                double bottom = top + 8 * scale;
+                double top = labelY(segment) - centerY + labelTop() * scale;
+                double bottom = labelY(segment) - centerY + labelBottom() * scale;
                 double nearY = top <= 0 && bottom >= 0 ? 0 : Math.min(Math.abs(top), Math.abs(bottom));
                 if (fits && Math.hypot(nearX, nearY) >= deadZone + 3 * scale) return width * scale;
             }
@@ -128,9 +136,6 @@ public final class QuickMenuLogic {
         if (shifted < 0) shifted += turn;
         return Math.min(count - 1, (int) (shifted / turn * count));
     }
-
-    /** Paused and unconfigured tools mark Off, even though the paused action is labelled On. */
-    public static boolean firstSegmentOn(boolean hasShape, boolean enabled) { return hasShape && !enabled; }
 
     /** Exactly one marker, at the first matching configuration in wheel order. */
     public static int activeIndex(List<Entry> entries, ShapeConfig shape, boolean enabled,
@@ -180,12 +185,41 @@ public final class QuickMenuLogic {
         return fitText(width.applyAsInt(full) <= maxWidth ? full : compact, maxWidth, width);
     }
 
-    public enum Kind { OFF, PRESET, HINT }
+    /** Centred stack, uniformly fitted so every row's corners stay inside a padded circle. */
+    public record HubLayout(double nameY, double imageY, double detailY, double height, double scale) { }
+
+    public static HubLayout hubLayout(double radius, double nameWidth, double nameHeight,
+            double imageSize, double detailWidth, double detailHeight) {
+        double gap = 3;
+        double height = nameHeight + imageSize + detailHeight
+                + (imageSize > 0 ? gap : 0) + (detailHeight > 0 ? gap : 0);
+        double nameY = -height / 2;
+        double imageY = nameY + nameHeight + (imageSize > 0 ? gap : 0);
+        double detailY = imageY + imageSize + (detailHeight > 0 ? gap : 0);
+        double extent = Math.hypot(nameWidth / 2, Math.max(Math.abs(nameY), Math.abs(nameY + nameHeight)));
+        if (imageSize > 0) extent = Math.max(extent,
+                Math.hypot(imageSize / 2, Math.max(Math.abs(imageY), Math.abs(imageY + imageSize))));
+        if (detailHeight > 0) extent = Math.max(extent,
+                Math.hypot(detailWidth / 2, Math.max(Math.abs(detailY), Math.abs(detailY + detailHeight))));
+        return new HubLayout(nameY, imageY, detailY, height, Math.min(1, radius / Math.max(1, extent)));
+    }
+
+    public enum Kind { OFF, RESUME, PRESET, HINT }
     public record Entry(Kind kind, String name) { }
 
     public static List<Entry> entries(List<String> favorites) {
+        return entries(favorites, null, false, name -> Optional.empty());
+    }
+
+    /** Resume is offered only for a paused shape that cannot be selected through a favorite. */
+    public static List<Entry> entries(List<String> favorites, ShapeConfig shape, boolean enabled,
+            java.util.function.Function<String, Optional<ShapeConfig>> lookup) {
         List<Entry> result = new ArrayList<>();
         result.add(new Entry(Kind.OFF, ""));
+        if (shape != null && !enabled && favorites.stream().noneMatch(name -> lookup.apply(name)
+                .map(c -> c.withRevision(0).equals(shape.withRevision(0))).orElse(false))) {
+            result.add(new Entry(Kind.RESUME, ""));
+        }
         favorites.forEach(name -> result.add(new Entry(Kind.PRESET, name)));
         if (favorites.isEmpty()) result.add(new Entry(Kind.HINT, ""));
         return List.copyOf(result);

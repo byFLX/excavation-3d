@@ -200,6 +200,7 @@
   "gui.excavation3d.escape_hint": "Esc closes without applying.",
   "gui.excavation3d.preview.summary": "%s × %s × %s · %s blocks",
   "gui.excavation3d.quick.on": "On",
+  "gui.excavation3d.quick.resume": "Resume",
   "gui.excavation3d.quick.delete_confirm": "Delete %s? Right-click again.",
   "tool.excavation3d.paused": "Off · %s",
   "message.excavation3d.enabled": "Shape: On",

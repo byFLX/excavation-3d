@@ -41,8 +41,10 @@ public record ShapeThumbnail(List<Face> faces) {
         }
         double fit = radius > 0 ? 1 / radius : 1;
         projected.sort(Comparator.comparingDouble(Projected::depth));
+        // GUI quads use counter-clockwise screen coordinates; the projected surface order is opposite.
+        // Reverse once in the cache so RenderType.gui's face culling does not hide the thumbnail.
         return new ShapeThumbnail(projected.stream().map(f -> new Face(f.points().stream()
-                .map(p -> new Point((p.x() - cx) * fit, (p.y() - cy) * fit)).toList(), f.rgb())).toList());
+                .map(p -> new Point((p.x() - cx) * fit, (p.y() - cy) * fit)).toList().reversed(), f.rgb())).toList());
     }
 
     private static void add(List<Projected> faces, PreviewPicking.Camera camera, int rgb, int... xyz) {

@@ -21,8 +21,8 @@ class QuickMenuLogicTest {
                         assertTrue(half > 0);
                         boolean separate = layout.labelX(segment) + half <= layout.shortcutX(segment) - 7 * s
                                 || layout.labelX(segment) - half >= layout.shortcutX(segment) + 7 * s
-                                || layout.labelY(segment) + 15 * s <= layout.shortcutY(segment) - 2 * s
-                                || layout.labelY(segment) + 7 * s >= layout.shortcutY(segment) + 8 * s;
+                                || layout.labelY(segment) + layout.labelBottom() * s <= layout.shortcutY(segment) - 2 * s
+                                || layout.labelY(segment) + layout.labelTop() * s >= layout.shortcutY(segment) + 8 * s;
                         assertTrue(separate, "Shortcut overlaps a name: count=" + count + ", segment=" + segment);
                     }
                 }
@@ -150,7 +150,7 @@ class QuickMenuLogicTest {
                     double halfWidth = layout.labelWidth(segment) / 2;
                     assertTrue(halfWidth >= 6 * layout.scale(), "A truncated label fits");
                     for (int column = -4; column <= 4; column++) {
-                        for (int row = 7; row <= 15; row++) {
+                        for (double row = layout.labelTop(); row <= layout.labelBottom(); row++) {
                             double dx = layout.labelX(segment) + halfWidth * column / 4 - layout.centerX();
                             double dy = layout.labelY(segment) + row * layout.scale() - layout.centerY();
                             double distance = Math.hypot(dx, dy);
@@ -290,14 +290,51 @@ class QuickMenuLogicTest {
                 true, n -> { throw new AssertionError("The hint must not look up a favorite"); }));
     }
 
-    @Test void firstSegmentOffersOnOnlyForAPausedStoredShape() {
-        assertFalse(QuickMenuLogic.firstSegmentOn(false, false));
-        assertFalse(QuickMenuLogic.firstSegmentOn(false, true));
-        assertFalse(QuickMenuLogic.firstSegmentOn(true, true));
-        assertTrue(QuickMenuLogic.firstSegmentOn(true, false));
+    @Test void resumeFollowsOffOnlyForPausedUnmatchedShapes() {
+        var shape = ShapeConfig.of(new ShapeParams.Cuboid(3, 3, 1));
+        var other = ShapeConfig.of(new ShapeParams.Cuboid(1, 2, 1));
+        var names = List.of("A", "B");
+        java.util.function.Function<String, java.util.Optional<ShapeConfig>> lookup = n -> java.util.Optional.of(other);
+        for (boolean enabled : new boolean[] {false, true}) {
+            for (ShapeConfig config : new ShapeConfig[] {null, shape}) {
+                var menu = QuickMenuLogic.entries(names, config, enabled, lookup);
+                assertEquals(QuickMenuLogic.Kind.OFF, menu.getFirst().kind());
+                boolean resume = config != null && !enabled;
+                assertEquals(resume ? 4 : 3, menu.size());
+                if (resume) assertEquals(QuickMenuLogic.Kind.RESUME, menu.get(1).kind());
+                assertEquals(names, menu.stream().filter(e -> e.kind() == QuickMenuLogic.Kind.PRESET)
+                        .map(QuickMenuLogic.Entry::name).toList());
+                assertEquals(config == null || !enabled ? 0 : -1,
+                        QuickMenuLogic.activeIndex(menu, config, enabled, lookup));
+            }
+        }
+        var noFavorites = QuickMenuLogic.entries(List.of(), shape, false, lookup);
+        assertEquals(List.of(QuickMenuLogic.Kind.OFF, QuickMenuLogic.Kind.RESUME, QuickMenuLogic.Kind.HINT),
+                noFavorites.stream().map(QuickMenuLogic.Entry::kind).toList());
+        assertEquals(0, QuickMenuLogic.activeIndex(noFavorites, shape, false, lookup));
+        var deletion = new QuickMenuLogic.FavoriteDelete();
+        assertFalse(deletion.rightClick(noFavorites.get(1)));
+        assertFalse(deletion.rightClick(noFavorites.get(1)));
     }
 
-    @Test void activeDotIsOffWhenPausedOtherwiseFirstMatchingShapeOrNone() {
+    @Test void matchingFavoriteResumesWithoutExtraSegmentAndBecomesActiveIgnoringRevision() {
+        var shape = ShapeConfig.of(new ShapeParams.Cuboid(3, 3, 1));
+        var names = List.of("First", "Duplicate");
+        java.util.function.Function<String, java.util.Optional<ShapeConfig>> lookup = n -> java.util.Optional.of(shape);
+        var paused = QuickMenuLogic.entries(names, shape.withRevision(42), false, lookup);
+        assertEquals(List.of(QuickMenuLogic.Kind.OFF, QuickMenuLogic.Kind.PRESET, QuickMenuLogic.Kind.PRESET),
+                paused.stream().map(QuickMenuLogic.Entry::kind).toList());
+        assertEquals(0, QuickMenuLogic.activeIndex(paused, shape, false, lookup));
+        var reopened = QuickMenuLogic.entries(names, shape.withRevision(43), true, lookup);
+        assertEquals(1, QuickMenuLogic.activeIndex(reopened, shape.withRevision(43), true, lookup));
+        // Removing the last matching favorite exposes Resume without altering the paused tool.
+        var afterDeletion = QuickMenuLogic.entries(List.of(), shape, false, lookup);
+        assertEquals(QuickMenuLogic.Kind.RESUME, afterDeletion.get(1).kind());
+        var transformed = QuickMenuLogic.entries(names, shape.withTransform(new ShapeTransform(1, false)), false, lookup);
+        assertEquals(QuickMenuLogic.Kind.RESUME, transformed.get(1).kind());
+    }
+
+    @Test void activeEntryIsOffWhenPausedOtherwiseFirstMatchingShapeOrNone() {
         var shape = ShapeConfig.of(new ShapeParams.Cuboid(4, 4, 1));
         var menu = QuickMenuLogic.entries(List.of("Zulu", "Alpha"));
         java.util.function.Function<String, java.util.Optional<ShapeConfig>> lookup = n -> java.util.Optional.of(shape);
@@ -306,6 +343,66 @@ class QuickMenuLogicTest {
         assertEquals(1, QuickMenuLogic.activeIndex(menu, shape.withRevision(42), true, lookup));
         assertEquals(-1, QuickMenuLogic.activeIndex(menu, shape.withTransform(new ShapeTransform(1, false)), true, lookup));
         assertEquals(-1, QuickMenuLogic.activeIndex(menu, shape, true, n -> java.util.Optional.empty()));
+    }
+
+    @Test void resumeAndFavoritesStayReachableAcrossPagesWithOffAlwaysAbove() {
+        var shape = ShapeConfig.of(new ShapeParams.Cuboid(3, 3, 1));
+        var names = java.util.stream.IntStream.range(0, 16).mapToObj(i -> "Favorite " + i).toList();
+        var selected = ShapeConfig.of(new ShapeParams.Cuboid(1, 2, 1));
+        java.util.function.Function<String, java.util.Optional<ShapeConfig>> lookup = name -> java.util.Optional.of(selected);
+        var menu = QuickMenuLogic.entries(names, shape, false, lookup);
+        var first = QuickMenuLogic.layout(640, 360, menu.size(), 0);
+        assertEquals(QuickMenuLogic.Kind.RESUME, menu.get(first.numberSelection(2)).kind());
+        for (int page = 0; page < first.pages(); page++) {
+            var l = QuickMenuLogic.layout(640, 360, menu.size(), page);
+            assertEquals(0, l.numberSelection(1));
+            assertEquals(0, l.highlighted(l.centerX(), l.centerY() - l.radius()));
+        }
+        // Reopening after applying a later favorite identifies its index and visible page.
+        java.util.function.Function<String, java.util.Optional<ShapeConfig>> distinct = name -> java.util.Optional.of(
+                name.equals(names.get(12)) ? selected : shape);
+        var reopened = QuickMenuLogic.entries(names, selected.withRevision(99), true, distinct);
+        int active = QuickMenuLogic.activeIndex(reopened, selected.withRevision(99), true, distinct);
+        assertEquals(13, active);
+        var activePage = QuickMenuLogic.layout(640, 360, reopened.size(), (active - 1) / 7);
+        assertEquals(active, activePage.numberSelection(active - activePage.offset() + 1));
+    }
+
+    @Test void twoHalvesUseTheirAreaCentresAndKeepIconNameAndCheckInsideTheRing() {
+        var l = QuickMenuLogic.layout(640, 360, 2, 0);
+        double centroid = 4 * (Math.pow(88, 3) - Math.pow(28, 3)) / (3 * Math.PI * (88 * 88 - 28 * 28));
+        assertEquals(centroid, l.labelRadius(), 1e-9);
+        assertEquals(l.centerX(), l.labelX(0), 1e-9);
+        assertEquals(l.centerX(), l.labelX(1), 1e-9);
+        assertEquals(l.centerY() - centroid, l.labelY(0), 1e-9);
+        assertEquals(l.centerY() + centroid, l.labelY(1), 1e-9);
+        assertTrue(l.labelWidth(0) >= 18 + 9 + 20, "Icon, check and useful label width fit together");
+        assertEquals(l.labelWidth(0), l.labelWidth(1));
+    }
+
+    @Test void hubStackStaysCentredWithEvenGapsAndPaddedCornersAtEveryScale() {
+        // One/two-line names, Off, Resume/favorites, Cancel, and message-only states.
+        for (double[] rows : new double[][] {{36, 6.3, 20, 30, 5.4}, {36, 12.6, 20, 36, 5.4},
+                {14, 6.3, 14, 36, 5.4}, {28, 6.3, 0, 0, 0}, {36, 12.6, 0, 0, 0},
+                {36, 12.6, 0, 36, 5.4}}) {
+            var hub = QuickMenuLogic.hubLayout(22, rows[0], rows[1], rows[2], rows[3], rows[4]);
+            assertEquals(-hub.height() / 2, hub.nameY());
+            double bottom = rows[4] > 0 ? hub.detailY() + rows[4]
+                    : rows[2] > 0 ? hub.imageY() + rows[2] : hub.nameY() + rows[1];
+            assertEquals(hub.height() / 2, bottom, 1e-9);
+            if (rows[2] > 0) assertEquals(3, hub.imageY() - hub.nameY() - rows[1], 1e-9);
+            if (rows[4] > 0) assertEquals(3, hub.detailY() - hub.imageY() - rows[2], 1e-9);
+            double[][] boxes = {{rows[0], rows[1], hub.nameY()}, {rows[2], rows[2], hub.imageY()},
+                    {rows[3], rows[4], hub.detailY()}};
+            for (double guiScale : new double[] {0.1, 0.5, 0.8, 1}) {
+                for (double[] box : boxes) {
+                    if (box[1] == 0) continue;
+                    for (double y : new double[] {box[2], box[2] + box[1]}) {
+                        assertTrue(Math.hypot(box[0] / 2, y) * hub.scale() * guiScale <= 22 * guiScale + 1e-9);
+                    }
+                }
+            }
+        }
     }
 
     @Test void deletionNeedsTwoClicksOnTheSameFavoriteAndMovingAwayCancels() {

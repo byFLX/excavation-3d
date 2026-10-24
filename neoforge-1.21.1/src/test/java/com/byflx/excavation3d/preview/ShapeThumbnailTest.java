@@ -30,6 +30,14 @@ class ShapeThumbnailTest {
             for (double radius : new double[] {1, 6, 12, 24, 100}) {
                 for (var face : thumbnail.faces()) {
                     assertEquals(4, face.points().size());
+                    // Same screen winding as GUI fill quads; the opposite order is culled by RenderType.gui.
+                    double signedArea = 0;
+                    for (int i = 0; i < 4; i++) {
+                        var a = face.points().get(i);
+                        var b = face.points().get((i + 1) % 4);
+                        signedArea += a.x() * b.y() - b.x() * a.y();
+                    }
+                    assertTrue(signedArea < 0, "Every cached face must face the GUI camera");
                     for (var point : face.points()) {
                         assertTrue(Double.isFinite(point.x()) && Double.isFinite(point.y()));
                         assertTrue(Math.hypot(point.x() * radius, point.y() * radius) <= radius + 1e-9);

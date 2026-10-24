@@ -10,17 +10,19 @@ import com.byflx.excavation3d.registry.ModComponents;
 import com.byflx.excavation3d.shape.ShapeConfig;
 import com.byflx.excavation3d.shape.ShapeGenerator;
 import com.byflx.excavation3d.preview.ShapeThumbnail;
-import com.byflx.excavation3d.text.ShapeTexts;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.List;
 import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.neoforged.neoforge.client.event.RenderGuiLayerEvent;
+import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
 import org.joml.Matrix4f;
 import org.lwjgl.glfw.GLFW;
 
@@ -32,17 +34,14 @@ public final class QuickShapeScreen extends Screen {
     private record WheelEntry(QuickMenuLogic.Entry entry, ShapeConfig config, Component name,
             Component details, ShapeThumbnail thumbnail, boolean active, boolean enabled) { }
 
-    private final List<WheelEntry> entries;
+    private List<WheelEntry> entries;
     private final int slot;
     private final ItemStack tool;
-    private final boolean firstOn;
     private final ShapeConfig activeConfig;
     private final boolean shapeEnabled;
     private final QuickMenuLogic.FavoriteDelete deletion = new QuickMenuLogic.FavoriteDelete();
     private boolean rightClicked;
-    private final Component currentType;
-    private final Component currentSize;
-    private final double[] hover;
+    private double[] hover;
     private long openedAt, lastFrame;
     private boolean initialized, finished;
     private int page;
@@ -53,25 +52,29 @@ public final class QuickShapeScreen extends Screen {
         tool = player.getMainHandItem();
         ToolShapeData data = tool.get(ModComponents.TOOL_SHAPE.get());
         shapeEnabled = data != null && data.enabled();
-        ShapeConfig active = data == null ? null : data.config().orElse(null);
-        activeConfig = active;
-        firstOn = QuickMenuLogic.firstSegmentOn(active != null, shapeEnabled);
-        currentType = active == null || !shapeEnabled ? Component.translatable("gui.excavation3d.quick.off") : ShapeTexts.typeName(active.type());
-        currentSize = active != null && ShapeGenerator.generate(active, ClientState.limits()) instanceof ShapeGenerator.Valid valid
-                ? Component.translatable("gui.excavation3d.quick.size", valid.shape().width(), valid.shape().height(), valid.shape().depth())
-                : Component.empty();
+        activeConfig = data == null ? null : data.config().orElse(null);
+        rebuildEntries();
+        // Reopening shows the active favorite even when it lives on a later page.
+        for (int i = 1; i < entries.size(); i++) {
+            if (entries.get(i).active()) page = (i - 1) / (QuickMenuLogic.PAGE_SIZE - 1);
+        }
+    }
+
+    private void rebuildEntries() {
         // Snapshot configs and generated summaries once; rendering never generates shapes or reads disk.
-        var menu = QuickMenuLogic.entries(PresetRepository.get().names());
-        int activeIndex = QuickMenuLogic.activeIndex(menu, active, shapeEnabled, PresetRepository.get()::find);
+        var presets = PresetRepository.get();
+        var menu = QuickMenuLogic.entries(presets.names(), activeConfig, shapeEnabled, presets::find);
+        int activeIndex = QuickMenuLogic.activeIndex(menu, activeConfig, shapeEnabled, presets::find);
         entries = menu.stream().map(entry -> {
             if (entry.kind() == QuickMenuLogic.Kind.HINT) return emptyHint();
             ShapeConfig config = switch (entry.kind()) {
-                case OFF -> firstOn ? active : null;
-                case PRESET -> PresetRepository.get().find(entry.name()).orElse(null);
-                case HINT -> null;
+                case RESUME -> activeConfig;
+                case PRESET -> presets.find(entry.name()).orElse(null);
+                case OFF, HINT -> null;
             };
             Component name = switch (entry.kind()) {
-                case OFF -> Component.translatable(firstOn ? "gui.excavation3d.quick.on" : "gui.excavation3d.quick.off");
+                case OFF -> Component.translatable("gui.excavation3d.quick.off");
+                case RESUME -> Component.translatable("gui.excavation3d.quick.resume");
                 case PRESET -> Component.literal(entry.name());
                 case HINT -> Component.empty();
             };
@@ -89,7 +92,7 @@ public final class QuickShapeScreen extends Screen {
             }
             return new WheelEntry(entry, config, name, details, thumbnail,
                     activeIndex >= 0 && menu.get(activeIndex).equals(entry), enabled);
-        }).collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
+        }).toList();
         hover = new double[entries.size()];
     }
 
@@ -112,6 +115,12 @@ public final class QuickShapeScreen extends Screen {
 
     @Override public boolean isPauseScreen() { return false; }
     @Override public void onClose() { finish(-1); }
+
+    /** Suppress both the normal crosshair and its debug variant for this screen's lifetime. */
+    public static void onRenderGuiLayer(RenderGuiLayerEvent.Pre event) {
+        if (Minecraft.getInstance().screen instanceof QuickShapeScreen
+                && event.getName().equals(VanillaGuiLayers.CROSSHAIR)) event.setCanceled(true);
+    }
 
     private QuickMenuLogic.Layout layout() { return QuickMenuLogic.layout(width, height, entries.size(), page); }
 
@@ -138,10 +147,11 @@ public final class QuickShapeScreen extends Screen {
         if (!canApply || index < 0 || index >= entries.size()) return;
         WheelEntry selection = entries.get(index);
         if (!selection.enabled()) return;
-        if (selection.entry().kind() == QuickMenuLogic.Kind.OFF) {
-            QuickShapeAction.start(null);
-        } else {
-            QuickShapeAction.startPreset(selection.config(), selection.entry().name());
+        switch (selection.entry().kind()) {
+            case OFF -> QuickShapeAction.setEnabled(false);
+            case RESUME -> QuickShapeAction.setEnabled(true);
+            case PRESET -> QuickShapeAction.startPreset(selection.config(), selection.entry().name());
+            case HINT -> { }
         }
     }
 
@@ -155,17 +165,9 @@ public final class QuickShapeScreen extends Screen {
             int index = layout().highlighted(mx, my);
             QuickMenuLogic.Entry entry = index < 0 ? null : entries.get(index).entry();
             if (deletion.rightClick(entry) && PresetRepository.get().delete(entry.name())) {
-                entries.remove(index);
-                if (entries.size() == 1) entries.add(emptyHint());
+                // Deleting the paused shape's last matching favorite must expose Resume immediately.
+                rebuildEntries();
                 page = layout().page();
-                boolean marked = activeConfig == null || !shapeEnabled;
-                for (int i = 0; i < entries.size(); i++) {
-                    WheelEntry e = entries.get(i);
-                    boolean active = i == 0 ? marked : !marked && e.config() != null
-                            && e.config().withRevision(0).equals(activeConfig.withRevision(0));
-                    if (active) marked = true;
-                    entries.set(i, new WheelEntry(e.entry(), e.config(), e.name(), e.details(), e.thumbnail(), active, e.enabled()));
-                }
             }
             return true;
         }
@@ -227,36 +229,33 @@ public final class QuickShapeScreen extends Screen {
             double start = l.angle(segment) - half + gap, end = l.angle(segment) + half - gap;
             double outer = l.radius() + 4 * l.scale() * h;
             int outline = alpha(mix(0x70424A52, ACCENT, h), fade);
-            int fill = alpha(mix(0xB0101418, 0xD02C3239, h), fade);
+            int baseFill = mix(0xB0101418, 0xD02C3239, h);
+            // Composite a 25% gold tint into the fill, retaining the hover's brighter base.
+            int fill = alpha(entries.get(index).active() ? mix(baseFill, 0xFFE0B020, 0.25) : baseFill, fade);
             sector(g, l, outer, start, end, outline, fill);
-            if (entries.get(index).active()) {
-                double r = outer - 3 * l.scale();
-                // Keep the active marker beside the shortcut, clear of its digit.
-                double markerAngle = l.angle(segment) + 0.16;
-                double x = l.centerX() + Math.cos(markerAngle) * r;
-                double y = l.centerY() + Math.sin(markerAngle) * r;
-                dot(g, x, y, 1.7 * l.scale(), alpha(ACCENT, fade));
-            }
         }
         g.flush();
         for (int segment = 0; segment < l.segments(); segment++) {
             int index = l.index(segment);
             WheelEntry entry = entries.get(index);
-            int color = alpha(entry.enabled() ? TEXT : MUTED, fade * (entry.enabled() ? 1 : 0.65));
-            g.pose().pushPose();
-            g.pose().translate(l.labelX(segment), l.labelY(segment), 0);
-            g.pose().scale((float) l.scale(), (float) l.scale(), 1);
-            switch (entry.entry().kind()) {
-                case OFF -> {
-                    if (firstOn) ShapeTypeIcons.draw(g, entry.config().type(), -5, -5, 2, color);
-                    else ShapeTypeIcons.drawOff(g, -7, -7, 2, color);
+            int color = alpha(entry.active() ? ACCENT : entry.enabled() ? TEXT : MUTED,
+                    fade * (entry.enabled() ? 1 : 0.65));
+            if (l.segments() == 2) {
+                segmentName(g, entry, l.labelX(segment), l.labelY(segment) - 3 * l.scale(),
+                        l.labelWidth(segment), l.scale(), color, true);
+            } else {
+                g.pose().pushPose();
+                g.pose().translate(l.labelX(segment), l.labelY(segment), 0);
+                g.pose().scale((float) l.scale(), (float) l.scale(), 1);
+                switch (entry.entry().kind()) {
+                    case OFF -> ShapeTypeIcons.drawOff(g, -7, -7, 2, color);
+                    case RESUME, PRESET -> ShapeTypeIcons.draw(g, entry.config() == null ? null : entry.config().type(), -5, -5, 2, color);
+                    case HINT -> { }
                 }
-                case PRESET -> ShapeTypeIcons.draw(g, entry.config() == null ? null : entry.config().type(), -5, -5, 2, color);
-                case HINT -> { }
+                g.pose().popPose();
+                segmentName(g, entry, l.labelX(segment), l.labelY(segment) + 8 * l.scale(),
+                        l.labelWidth(segment), l.scale(), color, false);
             }
-            g.pose().popPose();
-            line(g, entry.name(), l.labelX(segment), l.labelY(segment) + 8 * l.scale(),
-                    l.labelWidth(segment), 0.65 * l.scale(), color);
             line(g, Component.literal(Integer.toString(segment + 1)),
                     l.shortcutX(segment), l.shortcutY(segment),
                     10 * l.scale(), 0.6 * l.scale(), alpha(MUTED, fade));
@@ -279,73 +278,90 @@ public final class QuickShapeScreen extends Screen {
         double s = l.scale();
         double cx = l.centerX(), cy = l.centerY();
         if (hovered == null) {
-            line(g, Component.translatable("gui.excavation3d.quick.current_label"), cx, cy - 18 * s,
-                    36 * s, 0.65 * s, alpha(MUTED, fade));
-            line(g, currentType, cx, cy - 6 * s, 48 * s, 0.65 * s, alpha(TEXT, fade));
-            line(g, currentSize, cx, cy + 6 * s, 46 * s, 0.65 * s, alpha(TEXT, fade));
-            line(g, Component.translatable("gui.excavation3d.quick.cancel"), cx, cy + 17 * s,
-                    30 * s, 0.55 * s, alpha(MUTED, fade));
+            line(g, Component.translatable("gui.excavation3d.quick.cancel"), cx, cy - font.lineHeight * 0.35 * s,
+                    36 * s, 0.7 * s, alpha(MUTED, fade));
             return;
         }
-        if (deletion.pending() != null || hovered.entry().kind() == QuickMenuLogic.Kind.HINT) {
-            Component message = deletion.pending() == null ? hovered.name()
-                    : Component.translatable("gui.excavation3d.quick.delete_confirm", deletion.pending());
-            var lines = font.split(Component.literal(QuickMenuLogic.singleLine(message.getString()))
-                    .withStyle(message.getStyle()), 64);
-            float textScale = (float) Math.min(0.6 * s, 32 * s / Math.max(1, lines.size() * font.lineHeight));
-            g.pose().pushPose();
-            g.pose().translate(cx, cy - lines.size() * font.lineHeight * textScale / 2, 0);
-            g.pose().scale(textScale, textScale, 1);
-            for (int i = 0; i < lines.size(); i++) {
-                g.drawString(font, lines.get(i), -font.width(lines.get(i)) / 2, i * font.lineHeight,
-                        alpha(deletion.pending() == null ? MUTED : 0xFFFFDD55, fade), false);
-            }
-            g.pose().popPose();
-            return;
-        }
-        if (hovered.entry().kind() == QuickMenuLogic.Kind.OFF && !firstOn) {
-            g.pose().pushPose();
-            g.pose().translate(cx - 10.5 * s, cy - 10.5 * s, 0);
-            g.pose().scale((float) s, (float) s, 1);
-            ShapeTypeIcons.drawOff(g, 0, 0, 3, alpha(TEXT, fade));
-            g.pose().popPose();
-            return;
-        }
-        // Keep the name on the upper chord and the count on the lower chord of the inner circle.
-        fullName(g, hovered.name().copy().withStyle(ChatFormatting.BOLD), cx, cy - 24 * s, s,
-                alpha(TEXT, fade));
-        if (hovered.thumbnail() != null) {
-            VertexConsumer vertices = g.bufferSource().getBuffer(RenderType.gui());
-            Matrix4f matrix = g.pose().last().pose();
-            for (var face : hovered.thumbnail().faces()) {
-                int color = alpha(0xFF000000 | face.rgb(), fade);
-                for (var point : face.points()) {
-                    vertices.addVertex(matrix, (float) (cx + point.x() * 11 * s),
-                            (float) (cy + s + point.y() * 11 * s), 0).setColor(color);
-                }
-            }
-            g.flush();
-        }
-        Component detail = hovered.details();
-        double detailScale = hovered.thumbnail() == null ? 0.65 * s
-                : Math.min(0.65 * s, 32 * s / Math.max(1, font.width(detail)));
-        line(g, detail, cx, cy + 14 * s, 32 * s, detailScale, alpha(MUTED, fade));
-    }
-
-    /** Fits the complete name in at most two lines; segment labels may still abbreviate. */
-    private void fullName(GuiGraphics g, Component name, double x, double y, double scale, int color) {
+        boolean messageOnly = deletion.pending() != null || hovered.entry().kind() == QuickMenuLogic.Kind.HINT;
+        Component name = deletion.pending() != null
+                ? Component.translatable("gui.excavation3d.quick.delete_confirm", deletion.pending())
+                : hovered.name().copy().withStyle(ChatFormatting.BOLD);
+        Component detail = messageOnly ? Component.empty() : hovered.details();
+        boolean off = !messageOnly && hovered.entry().kind() == QuickMenuLogic.Kind.OFF;
+        double imageSize = off ? 14 : !messageOnly && hovered.thumbnail() != null ? 20 : 0;
         var lines = QuickMenuLogic.wrapName(name.getString(),
                 text -> font.width(Component.literal(text).withStyle(name.getStyle())),
                 (text, wrapWidth) -> font.split(Component.literal(text).withStyle(name.getStyle()), wrapWidth),
                 text -> Component.literal(text).withStyle(name.getStyle()).getVisualOrderText());
         int widest = lines.stream().mapToInt(font::width).max().orElse(1);
-        float textScale = (float) Math.min(0.7 * scale, 36 * scale / Math.max(1, widest));
+        double nameScale = Math.min(0.7, 36.0 / Math.max(1, widest));
+        double detailScale = Math.min(0.6, 36.0 / Math.max(1, font.width(detail)));
+        double detailHeight = detail.getString().isEmpty() ? 0 : font.lineHeight * detailScale;
+        var hub = QuickMenuLogic.hubLayout(l.deadZone() / s - 6, widest * nameScale,
+                lines.size() * font.lineHeight * nameScale, imageSize, font.width(detail) * detailScale, detailHeight);
+        // One measured block, with equal top/bottom padding and every corner inside the padded circle.
         g.pose().pushPose();
-        g.pose().translate(x, y, 0);
-        g.pose().scale(textScale, textScale, 1);
+        g.pose().translate(cx, cy, 10);
+        g.pose().scale((float) (s * hub.scale()), (float) (s * hub.scale()), 1);
+        g.pose().pushPose();
+        g.pose().translate(0, hub.nameY(), 0);
+        g.pose().scale((float) nameScale, (float) nameScale, 1);
         for (int i = 0; i < lines.size(); i++) {
-            g.drawString(font, lines.get(i), -font.width(lines.get(i)) / 2,
-                    i * font.lineHeight, color, false);
+            g.drawString(font, lines.get(i), -font.width(lines.get(i)) / 2, i * font.lineHeight,
+                    alpha(deletion.pending() == null ? TEXT : ACCENT, fade), false);
+        }
+        g.pose().popPose();
+        g.flush();
+        if (off) {
+            g.pose().pushPose();
+            g.pose().translate(-7, hub.imageY(), 0);
+            ShapeTypeIcons.drawOff(g, 0, 0, 2, alpha(TEXT, fade));
+            g.pose().popPose();
+        } else if (imageSize > 0) {
+            VertexConsumer vertices = g.bufferSource().getBuffer(RenderType.gui());
+            Matrix4f matrix = g.pose().last().pose();
+            for (var face : hovered.thumbnail().faces()) {
+                int color = alpha(0xFF000000 | face.rgb(), fade);
+                for (var point : face.points()) {
+                    vertices.addVertex(matrix, (float) (point.x() * imageSize / 2),
+                            (float) (hub.imageY() + imageSize / 2 + point.y() * imageSize / 2), 0).setColor(color);
+                }
+            }
+            g.flush();
+        }
+        if (detailHeight > 0) line(g, detail, 0, hub.detailY(), 36, detailScale, alpha(MUTED, fade));
+        g.pose().popPose();
+    }
+
+    /** Reserve room for a drawn check mark so it stays visible even beside abbreviated names. */
+    private void segmentName(GuiGraphics g, WheelEntry entry, double x, double y,
+            double maxWidth, double scale, int color, boolean inlineIcon) {
+        if ((color >>> 24) < 4) return;
+        double iconWidth = inlineIcon && entry.entry().kind() != QuickMenuLogic.Kind.HINT ? 18 : 0;
+        double checkWidth = entry.active() ? 9 : 0;
+        String fitted = QuickMenuLogic.fitText(entry.name().getString(),
+                (int) Math.floor(Math.max(0, maxWidth / scale - iconWidth - checkWidth) / 0.65), font::width);
+        double textWidth = font.width(fitted) * 0.65;
+        g.pose().pushPose();
+        g.pose().translate(x - (iconWidth + textWidth + checkWidth) * scale / 2, y, 0);
+        g.pose().scale((float) scale, (float) scale, 1);
+        if (iconWidth > 0) {
+            if (entry.entry().kind() == QuickMenuLogic.Kind.OFF) ShapeTypeIcons.drawOff(g, 0, -4, 2, color);
+            else ShapeTypeIcons.draw(g, entry.config() == null ? null : entry.config().type(), 2, -2, 2, color);
+        }
+        g.pose().pushPose();
+        g.pose().translate(iconWidth, 0, 0);
+        g.pose().scale(0.65F, 0.65F, 1);
+        g.drawString(font, fitted, 0, 0, color, false);
+        g.pose().popPose();
+        if (entry.active()) {
+            g.pose().translate(iconWidth + textWidth + 2, 1, 0);
+            // Pixel check, independent of the selected language/font's glyph coverage.
+            g.fill(0, 2, 1, 4, color);
+            g.fill(1, 3, 2, 5, color);
+            g.fill(2, 2, 3, 4, color);
+            g.fill(3, 1, 4, 3, color);
+            g.fill(4, 0, 5, 2, color);
         }
         g.pose().popPose();
     }
@@ -374,11 +390,6 @@ public final class QuickShapeScreen extends Screen {
             result |= (int) Math.round(a + (b - a) * amount) << shift;
         }
         return result;
-    }
-
-    private static void dot(GuiGraphics g, double x, double y, double radius, int color) {
-        var l = new QuickMenuLogic.Layout(x, y, radius, 0, 1, 0);
-        arc(g, l, 0, radius, 0, Math.PI * 2, color);
     }
 
     /** Shared angular vertices for every border/fill band: neither gaps nor alpha overlaps at seams. */

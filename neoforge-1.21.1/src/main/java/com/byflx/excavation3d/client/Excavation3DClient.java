@@ -51,6 +51,7 @@ public final class Excavation3DClient {
         NeoForge.EVENT_BUS.addListener(Excavation3DClient::onLoggingOut);
         NeoForge.EVENT_BUS.addListener(WorldPreview::onRenderLevel);
         NeoForge.EVENT_BUS.addListener(ToolHud::onRenderGui);
+        NeoForge.EVENT_BUS.addListener(QuickShapeScreen::onRenderGuiLayer);
         NeoForge.EVENT_BUS.addListener(Excavation3DClient::onTooltip);
     }
 
