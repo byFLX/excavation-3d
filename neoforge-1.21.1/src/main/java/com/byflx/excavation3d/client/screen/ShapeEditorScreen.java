@@ -62,7 +62,8 @@ public final class ShapeEditorScreen extends Screen {
     private static final int ERROR = 0xFF5555;
     private static final int WARN = 0xFFDD55;
 
-    private record RowLabel(Component text, int baseY) {
+    private record RowLabel(Component text, int baseY, int color) {
+        RowLabel(Component text, int baseY) { this(text, baseY, TEXT); }
     }
 
     private enum Menu {
@@ -244,7 +245,7 @@ public final class ShapeEditorScreen extends Screen {
                 scrolled(direction, y);
                 y += ROW;
                 Component orientation = Component.translatable("gui.excavation3d.stair_orientation");
-                labels.add(new RowLabel(orientation, y - 4));
+                labels.add(new RowLabel(orientation, y - 4, MUTED));
                 y += font.split(orientation, leftW).size() * font.lineHeight + 3;
             }
             case CUSTOM -> y = transformRow(y);
@@ -269,6 +270,7 @@ public final class ShapeEditorScreen extends Screen {
             camera.reset();
             preview.resetScale();
         }).bounds(previewX1 - resetWidth, previewY1 + 2, resetWidth, 18).build());
+        resetViewButton.setTooltip(Tooltip.create(resetView));
         initHeader();
         initBottom();
         refresh();
@@ -294,12 +296,14 @@ public final class ShapeEditorScreen extends Screen {
     private void typeRow(int y) {
         ShapeType[] types = ShapeType.values();
         int gap = 2;
-        int w = (leftW - gap * (types.length - 1)) / types.length;
+        int available = leftW - gap * (types.length - 1);
         for (int i = 0; i < types.length; i++) {
+            int x = leftX + i * available / types.length + i * gap;
+            int w = (i + 1) * available / types.length - i * available / types.length;
             ShapeType type = types[i];
             Component label = CommonComponents.optionNameValue(Component.translatable("gui.excavation3d.shape"),
                     ShapeTexts.typeName(type));
-            IconButton button = IconButton.pattern(leftX + i * (w + gap), y, w, 20, label, b -> selectType(type),
+            IconButton button = IconButton.pattern(x, y, w, 20, label, b -> selectType(type),
                     ShapeTypeIcons.pattern(type));
             button.setSelected(type == draft.type());
             scrolled(button, y);
@@ -322,6 +326,8 @@ public final class ShapeEditorScreen extends Screen {
     private void stepButton(String field, int delta, int x, int y) {
         Button button = Button.builder(Component.literal(delta < 0 ? "-" : "+"), b -> step(field, delta))
                 .bounds(x, y, STEP_WIDTH, 20).build();
+        button.setTooltip(Tooltip.create(Component.translatable(delta < 0
+                ? "gui.excavation3d.size.decrease" : "gui.excavation3d.size.increase", ShapeTexts.fieldName(field))));
         stepButtons.add(scrolled(button, y));
     }
 
@@ -341,13 +347,15 @@ public final class ShapeEditorScreen extends Screen {
         int nextX = (singleRow ? leftX + labelWidth + navigationWidth : leftX + leftW) - STEP_WIDTH;
         int boxX = nextX - 2 - positionWidth;
         int prevX = boxX - 2 - STEP_WIDTH;
-        scrolled(Button.builder(Component.literal("<"), b -> setLayer(layer - 1))
+        Button previousLayer = scrolled(Button.builder(Component.literal("<"), b -> setLayer(layer - 1))
                 .bounds(prevX, y, STEP_WIDTH, 20).build(), y);
+        previousLayer.setTooltip(Tooltip.create(Component.translatable("gui.excavation3d.layer.previous")));
         layerPosition = Button.builder(layerLabel(), b -> { }).bounds(boxX, y, positionWidth, 20).build();
         layerPosition.active = false;
         scrolled(layerPosition, y);
-        scrolled(Button.builder(Component.literal(">"), b -> setLayer(layer + 1))
+        Button nextLayer = scrolled(Button.builder(Component.literal(">"), b -> setLayer(layer + 1))
                 .bounds(nextX, y, STEP_WIDTH, 20).build(), y);
+        nextLayer.setTooltip(Tooltip.create(Component.translatable("gui.excavation3d.layer.next")));
         Button.Builder layerTools = Button.builder(menuText, b -> toggleLayerMenu());
         Button.Builder setStart = Button.builder(anchorText, b -> {
             anchorMode = !anchorMode;
@@ -397,10 +405,12 @@ public final class ShapeEditorScreen extends Screen {
 
     private List<Button> buttonRow(int y, Button.Builder... builders) {
         int gap = 2;
-        int w = (leftW - gap * (builders.length - 1)) / builders.length;
+        int available = leftW - gap * (builders.length - 1);
         List<Button> buttons = new ArrayList<>(builders.length);
         for (int i = 0; i < builders.length; i++) {
-            Button button = builders[i].bounds(leftX + i * (w + gap), y, w, 20).build();
+            int x = leftX + i * available / builders.length + i * gap;
+            int w = (i + 1) * available / builders.length - i * available / builders.length;
+            Button button = builders[i].bounds(x, y, w, 20).build();
             scrolled(button, y);
             buttons.add(button);
         }
@@ -552,7 +562,7 @@ public final class ShapeEditorScreen extends Screen {
         openMenu = Menu.PRESETS;
         favoriteStatus = Component.empty();
 
-        Component saveLabel = Component.translatable("gui.excavation3d.preset.save");
+        Component saveLabel = Component.translatable("gui.excavation3d.favorite.save_as");
         int saveW = Math.max(40, font.width(saveLabel) + 10);
         presetName = new EditBox(font, x + 4, y + 4, menuW - 8 - saveW - 2, 16,
                 Component.translatable("gui.excavation3d.preset.name"));
@@ -1348,7 +1358,7 @@ public final class ShapeEditorScreen extends Screen {
             int y = label.baseY() - scroll;
             if (y + 20 > contentTop && y < contentBottom) {
                 for (FormattedCharSequence line : font.split(label.text(), leftW)) {
-                    graphics.drawString(font, line, leftX, y + 6, TEXT);
+                    graphics.drawString(font, line, leftX, y + 6, label.color());
                     y += font.lineHeight;
                 }
             }
@@ -1364,7 +1374,7 @@ public final class ShapeEditorScreen extends Screen {
         }
 
         renderPreview(graphics, mx, my, partialTick);
-        renderSummary(graphics);
+        renderSummary(graphics, mx, my);
         if (menuOpen()) {
             graphics.pose().pushPose();
             graphics.pose().translate(0.0F, 0.0F, 300.0F);
@@ -1407,13 +1417,16 @@ public final class ShapeEditorScreen extends Screen {
         for (SizeRow row : sizeRows) {
             int y = row.y() - scroll;
             Component error = rowProblem(row.field());
+            int color = error == null ? TEXT
+                    : pendingResize != null && evaluation.fieldErrors().isEmpty()
+                            && !(evaluation.result() instanceof ShapeGenerator.Invalid) ? WARN : ERROR;
             graphics.pose().pushPose();
             graphics.pose().translate(row.valueX(), y + 4, 0);
             graphics.pose().scale(1.4F, 1.4F, 1);
-            graphics.drawCenteredString(font, draft.text(row.field()), 0, 0, error == null ? TEXT : ERROR);
+            graphics.drawCenteredString(font, draft.text(row.field()), 0, 0, color);
             graphics.pose().popPose();
             if (error != null) {
-                graphics.drawString(font, firstLine(error, leftW), leftX, y + ROW, ERROR);
+                graphics.drawString(font, firstLine(error, leftW), leftX, y + ROW, color);
             }
         }
     }
@@ -1476,13 +1489,13 @@ public final class ShapeEditorScreen extends Screen {
         if (anchor.z() == layer) {
             int sx = gx + anchor.x() * cellSize;
             int sy = gy + (h - 1 - anchor.y()) * cellSize;
-            graphics.renderOutline(sx - 1, sy - 1, cellSize + 1, cellSize + 1, 0xFFF1C232);
+            graphics.renderOutline(sx - 1, sy - 1, cellSize + 1, cellSize + 1, 0xFFE0B020);
         }
         Cell hovered = gridCell(mouseX, mouseY);
         if (hovered != null) {
             int sx = gx + hovered.x() * cellSize;
             int sy = gy + (h - 1 - hovered.y()) * cellSize;
-            graphics.renderOutline(sx, sy, cellSize - 1, cellSize - 1, anchorMode ? 0xFFF1C232 : 0xFFFFFFFF);
+            graphics.renderOutline(sx, sy, cellSize - 1, cellSize - 1, anchorMode ? 0xFFE0B020 : 0xFFFFFFFF);
         }
     }
 
@@ -1518,20 +1531,37 @@ public final class ShapeEditorScreen extends Screen {
         if (shown != null) {
             Component summary = Component.translatable("gui.excavation3d.preview.summary",
                     shown.width(), shown.height(), shown.depth(), shown.count());
-            float scale = Math.min(1.0F, (float) (resetViewButton.getX() - previewX0 - 8) / Math.max(1, font.width(summary)));
-            graphics.pose().pushPose();
-            graphics.pose().translate(previewX0 + 4, previewY1 + 7, 0);
-            graphics.pose().scale(scale, scale, 1);
-            graphics.drawString(font, summary, 0, 0, current == null ? MUTED : TEXT);
-            graphics.pose().popPose();
+            int available = resetViewButton.getX() - previewX0 - 8;
+            int color = current == null ? MUTED : TEXT;
+            if (font.width(summary) <= available) {
+                drawPreviewSummary(graphics, summary, previewY1 + 7, available, color);
+            } else {
+                drawPreviewSummary(graphics, Component.translatable("gui.excavation3d.quick.size",
+                        shown.width(), shown.height(), shown.depth()), previewY1 + 2, available, color);
+                drawPreviewSummary(graphics, Component.translatable("hud.excavation3d.preview.short", shown.count()),
+                        previewY1 + 2 + font.lineHeight, available, color);
+            }
         }
     }
 
-    private void renderSummary(GuiGraphics graphics) {
-        graphics.drawString(font, Component.translatable("gui.excavation3d.escape_hint"), leftX, actionY + 6, MUTED);
+    private void drawPreviewSummary(GuiGraphics graphics, Component text, int y, int maxWidth, int color) {
+        float scale = Math.min(1.0F, (float) maxWidth / Math.max(1, font.width(text)));
+        graphics.pose().pushPose();
+        graphics.pose().translate(previewX0 + 4, y, 0);
+        graphics.pose().scale(scale, scale, 1);
+        graphics.drawString(font, text, 0, 0, color);
+        graphics.pose().popPose();
+    }
+
+    private void renderSummary(GuiGraphics graphics, int mouseX, int mouseY) {
+        Component escapeHint = Component.translatable("gui.excavation3d.escape_hint");
+        String fittedHint = com.byflx.excavation3d.editor.QuickMenuLogic.fitText(escapeHint.getString(),
+                applyButton.getX() - leftX - 8, font::width);
+        graphics.drawString(font, fittedHint, leftX, actionY + 6, MUTED);
         Component problem = applyProblem();
         Component message = problem != null ? problem : status;
-        int color = currentProblem() != null ? ERROR : statusColor;
+        int color = currentProblem() != null
+                ? (pendingResize != null && evaluation.fieldErrors().isEmpty() ? WARN : ERROR) : statusColor;
         if (previewNotice != null && Util.getMillis() < previewNoticeUntil) {
             message = previewNotice;
             color = TEXT;
@@ -1539,6 +1569,10 @@ public final class ShapeEditorScreen extends Screen {
         List<FormattedCharSequence> lines = font.split(message, width - 2 * MARGIN);
         for (int i = 0; i < Math.min(2, lines.size()); i++) {
             graphics.drawString(font, lines.get(i), leftX, statusY + i * font.lineHeight, color);
+        }
+        if (lines.size() > 2 && mouseX >= leftX && mouseX < width - MARGIN
+                && mouseY >= statusY && mouseY < statusY + 2 * font.lineHeight) {
+            graphics.renderTooltip(font, message, mouseX, mouseY);
         }
         if (!applyButton.active) {
             graphics.fill(applyButton.getX(), actionY, applyButton.getX() + applyButton.getWidth(), actionY + 20,

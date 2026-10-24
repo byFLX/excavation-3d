@@ -231,8 +231,10 @@ public final class QuickShapeScreen extends Screen {
             sector(g, l, outer, start, end, outline, fill);
             if (entries.get(index).active()) {
                 double r = outer - 3 * l.scale();
-                double x = l.centerX() + Math.cos(l.angle(segment)) * r;
-                double y = l.centerY() + Math.sin(l.angle(segment)) * r;
+                // Keep the active marker beside the shortcut, clear of its digit.
+                double markerAngle = l.angle(segment) + 0.16;
+                double x = l.centerX() + Math.cos(markerAngle) * r;
+                double y = l.centerY() + Math.sin(markerAngle) * r;
                 dot(g, x, y, 1.7 * l.scale(), alpha(ACCENT, fade));
             }
         }
@@ -266,12 +268,14 @@ public final class QuickShapeScreen extends Screen {
                 l.centerX(), l.instructionsY(), width - 8, 0.8 * l.scale(), alpha(TEXT, fade));
         if (l.pages() > 1) {
             line(g, Component.translatable("gui.excavation3d.quick.page", l.page() + 1, l.pages()),
-                    l.centerX(), Math.min(height - 10, l.instructionsY() + 12 * l.scale()), width - 8, 0.7 * l.scale(), alpha(MUTED, fade));
+                    l.centerX(), Math.max(4, Math.min(height - 10, l.instructionsY() + 12 * l.scale())),
+                    width - 8, 0.7 * l.scale(), alpha(MUTED, fade));
         }
         g.flush();
     }
 
     private void renderHub(GuiGraphics g, QuickMenuLogic.Layout l, WheelEntry hovered, double fade) {
+        if ((alpha(TEXT, fade) >>> 24) < 4) return;
         double s = l.scale();
         double cx = l.centerX(), cy = l.centerY();
         if (hovered == null) {
@@ -287,12 +291,14 @@ public final class QuickShapeScreen extends Screen {
             Component message = deletion.pending() == null ? hovered.name()
                     : Component.translatable("gui.excavation3d.quick.delete_confirm", deletion.pending());
             var lines = font.split(Component.literal(QuickMenuLogic.singleLine(message.getString()))
-                    .withStyle(message.getStyle()), 70);
+                    .withStyle(message.getStyle()), 64);
+            float textScale = (float) Math.min(0.6 * s, 32 * s / Math.max(1, lines.size() * font.lineHeight));
             g.pose().pushPose();
-            g.pose().translate(cx, cy - lines.size() * 3 * s, 0);
-            g.pose().scale((float) (0.6 * s), (float) (0.6 * s), 1);
+            g.pose().translate(cx, cy - lines.size() * font.lineHeight * textScale / 2, 0);
+            g.pose().scale(textScale, textScale, 1);
             for (int i = 0; i < lines.size(); i++) {
-                g.drawString(font, lines.get(i), -font.width(lines.get(i)) / 2, i * 10, alpha(TEXT, fade), false);
+                g.drawString(font, lines.get(i), -font.width(lines.get(i)) / 2, i * font.lineHeight,
+                        alpha(deletion.pending() == null ? MUTED : 0xFFFFDD55, fade), false);
             }
             g.pose().popPose();
             return;
@@ -314,8 +320,8 @@ public final class QuickShapeScreen extends Screen {
             for (var face : hovered.thumbnail().faces()) {
                 int color = alpha(0xFF000000 | face.rgb(), fade);
                 for (var point : face.points()) {
-                    vertices.addVertex(matrix, (float) (cx + point.x() * 12 * s),
-                            (float) (cy + point.y() * 12 * s), 0).setColor(color);
+                    vertices.addVertex(matrix, (float) (cx + point.x() * 11 * s),
+                            (float) (cy + s + point.y() * 11 * s), 0).setColor(color);
                 }
             }
             g.flush();

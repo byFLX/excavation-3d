@@ -37,7 +37,7 @@ import org.lwjgl.opengl.GL11;
  */
 public final class ShapePreviewRenderer {
     private static final int SELECTED = 0x5DA9E9;
-    private static final int ANCHOR = 0xF1C232;
+    private static final int ANCHOR = 0xE0B020;
     private static final int ENVIRONMENT = 0x8C8C8C;
     private static final int ADDED = 0x20FF20;
     private static final int REMOVED = 0xFF2020;
@@ -143,7 +143,7 @@ public final class ShapePreviewRenderer {
                         ghost.x() + 1, ghost.y() + 1, ghost.z() + 1, 0.008F, 0x244F6578);
             }
             if (!shape.mask().contains(shape.anchor().x(), shape.anchor().y(), shape.anchor().z())) {
-                outlineCell(consumer, matrix, shape.anchor(), 0xFFF1C232);
+                outlineCell(consumer, matrix, shape.anchor(), 0xFFE0B020);
             }
         }
         for (int q = 0; q < quads; q++) {
@@ -154,7 +154,7 @@ public final class ShapePreviewRenderer {
             if (editable) {
                 pick(mouseX, mouseY, layer).ifPresent(hit -> {
                     if (anchorMode) {
-                        if (hit.selected()) outlineCell(consumer, matrix, hit.cell(), 0xFFF1C232);
+                        if (hit.selected()) outlineCell(consumer, matrix, hit.cell(), 0xFFE0B020);
                     } else {
                         if (hit.selected() && !hit.cell().equals(shape.anchor())) {
                             outlineCell(consumer, matrix, hit.cell(), 0xFFFF2020);

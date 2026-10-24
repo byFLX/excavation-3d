@@ -116,7 +116,7 @@ final class FavoritesPanel {
             if (rowY + FavoritesLayout.ROW <= layout.listTop() || rowY >= layout.listBottom()) continue;
             FavoritesOverview.Row row = rows.get(i);
             if (i == hovered && mx < trackX()) g.fill(x() + 1, rowY, trackX(), rowY + FavoritesLayout.ROW, 0xFF2E3440);
-            if (row.active()) g.fill(x() + 3, rowY + 9, x() + 6, rowY + 12, 0xFFFFD56B);
+            if (row.active()) g.fill(x() + 3, rowY + 10, x() + 6, rowY + 13, 0xFFE0B020);
             ShapeTypeIcons.draw(g, row.config().type(), x() + 9, rowY + 7, 2, 0xFFE0E0E0);
             int textX = x() + 23, textWidth = Math.max(0, deleteX() - textX - 2);
             String name = QuickMenuLogic.fitText(row.name(), textWidth, font::width);
@@ -127,7 +127,8 @@ final class FavoritesPanel {
             String detail = QuickMenuLogic.fitText(summary.getString(), textWidth, font::width);
             g.drawString(font, name, textX, rowY + 2, 0xE0E0E0);
             g.drawString(font, detail, textX, rowY + 13, confirming ? 0xFFDD55 : 0x909090);
-            g.drawString(font, "×", deleteX() + 4, rowY + 7, confirming ? 0xFFDD55 : 0xFF7070);
+            g.drawString(font, "×", deleteX() + (trackX() - deleteX() - font.width("×")) / 2,
+                    rowY + (FavoritesLayout.ROW - font.lineHeight) / 2, confirming ? 0xFFDD55 : 0xFF5555);
             if (i == hovered && mx < trackX()) {
                 if (mx >= deleteX()) tooltip = confirming ? summary
                         : Component.translatable("gui.excavation3d.favorite.delete_hint", row.name());

@@ -14,7 +14,7 @@ import net.minecraft.network.chat.Component;
 final class IconButton extends Button {
     private static final int ICON = 0xFFE0E0E0;
     private static final int ICON_INACTIVE = 0xFF808080;
-    private static final int SELECTED = 0xFFF1C232;
+    private static final int SELECTED = 0xFFE0B020;
 
     private final String[] pattern;
     private final Component glyph;
