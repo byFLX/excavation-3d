@@ -122,10 +122,7 @@ public final class CustomMaskDraft {
         if (!inBox(x, y, z) || bits.get(index(x, y, z)) == selected) {
             return false;
         }
-        if (!strokeActive || !strokeSaved) {
-            pushUndo();
-            strokeSaved = strokeActive;
-        }
+        pushUndo();
         bits.set(index(x, y, z), selected);
         return true;
     }
@@ -290,8 +287,11 @@ public final class CustomMaskDraft {
     }
 
     private void pushUndo() {
+        // A lossless resize triggered by a later cell in the stroke belongs to the same step.
+        if (strokeActive && strokeSaved) return;
         if (editListener != null) {
             editListener.run();
+            strokeSaved = strokeActive;
             return;
         }
         undo.push(snapshot());
@@ -299,6 +299,7 @@ public final class CustomMaskDraft {
             undo.removeLast();
         }
         redo.clear();
+        strokeSaved = strokeActive;
     }
 
     private Snapshot snapshot() {

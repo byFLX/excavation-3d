@@ -50,10 +50,20 @@ public final class QuickMenuLogic {
         public double scale() { return radius / 88.0; }
         public double labelX(int segment) { return centerX + Math.cos(angle(segment)) * labelRadius(); }
         public double labelY(int segment) { return centerY + Math.sin(angle(segment)) * labelRadius(); }
+        public double shortcutX(int segment) {
+            return centerX + Math.cos(angle(segment)) * (radius - 5 * scale());
+        }
+        public double shortcutY(int segment) {
+            return centerY + Math.sin(angle(segment)) * (radius - 5 * scale()) - 3 * scale();
+        }
         /** Bounds of the small name below the icon, including a margin at each sector edge. */
         public double labelWidth(int segment) {
             double scale = scale();
             for (int width = 100; width > 0; width--) {
+                // Reserve the full 10 x 6 shortcut box plus a two-pixel margin on each side.
+                if (Math.abs(labelX(segment) - shortcutX(segment)) < (width / 2.0 + 7) * scale
+                        && labelY(segment) + 15 * scale > shortcutY(segment) - 2 * scale
+                        && labelY(segment) + 7 * scale < shortcutY(segment) + 8 * scale) continue;
                 boolean fits = true;
                 for (int side : new int[] {-1, 1}) {
                     for (int y : new int[] {7, 15}) {
@@ -138,17 +148,32 @@ public final class QuickMenuLogic {
     /** A single line, shortened at code-point boundaries with an ellipsis when needed. */
     public static String fitText(String text, int maxWidth, ToIntFunction<String> width) {
         if (maxWidth <= 0) return "";
-        text = text.replace('\n', ' ').replace('\r', ' ');
+        text = singleLine(text);
         if (width.applyAsInt(text) <= maxWidth) return text;
         String ellipsis = "…";
         if (width.applyAsInt(ellipsis) > maxWidth) return "";
         int end = text.length();
-        while (end > 0) {
+        for (int remaining = text.codePointCount(0, end); remaining > 0; remaining--) {
             end = text.offsetByCodePoints(end, -1);
             String candidate = text.substring(0, end).stripTrailing() + ellipsis;
             if (width.applyAsInt(candidate) <= maxWidth) return candidate;
         }
         return ellipsis;
+    }
+
+    public static String singleLine(String text) {
+        return text.replaceAll("\\R", " ");
+    }
+
+    /** Two bounded wrap attempts; a broken splitter falls back to a complete single line. */
+    public static <T> List<T> wrapName(String text, ToIntFunction<String> width,
+            java.util.function.BiFunction<String, Integer, List<T>> split,
+            java.util.function.Function<String, T> unwrapped) {
+        String name = singleLine(text);
+        int fullWidth = Math.max(0, width.applyAsInt(name));
+        List<T> lines = split.apply(name, Math.max(40, fullWidth / 2 + fullWidth % 2));
+        if (lines.size() > 2) lines = split.apply(name, Math.max(40, fullWidth));
+        return lines.size() <= 2 ? lines : List.of(unwrapped.apply(name));
     }
 
     public static String fitHint(String full, String compact, int maxWidth, ToIntFunction<String> width) {

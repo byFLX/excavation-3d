@@ -8,6 +8,42 @@ import net.minecraft.core.Direction;
 import org.junit.jupiter.api.Test;
 
 class CustomOrientationTest {
+    @Test void legacyTransformedTemplatesKeepGeometryAndOrientationWhenOpenedReopenedAndUndone() {
+        var templates = java.util.List.of(new ShapeParams.Cuboid(7, 3, 2),
+                new ShapeParams.Plus(7, 5, 2, 1), new ShapeParams.Stair(3, 4, 2, 1, false),
+                new ShapeParams.Corridor(3, 3, 6, 1, 1, false));
+        for (ShapeParams params : templates) {
+            for (ShapeTransform transform : ShapeTransform.all()) {
+                if (transform.isIdentity()) continue;
+                ShapeConfig original = ShapeConfig.of(params, transform);
+                EditorDraft draft = EditorDraft.fromConfig(original);
+                assertEquals(ShapeType.CUSTOM, draft.type());
+                assertEquals(ShapeTransform.IDENTITY, draft.transform());
+                assertFalse(draft.canUndo());
+                assertTrue(draft.evaluate(ShapeLimits.DEFAULT).isValid());
+                ShapeConfig imported = draft.evaluate(ShapeLimits.DEFAULT).config();
+                assertEquals(original.orientationMode(), imported.orientationMode());
+                var before = ((ShapeGenerator.Valid) ShapeGenerator.generate(original, ShapeLimits.DEFAULT)).shape();
+                var after = draft.evaluate(ShapeLimits.DEFAULT).shape().orElseThrow();
+                assertEquals(before.mask(), after.mask());
+                for (Direction face : Direction.values()) {
+                    for (Direction facing : new Direction[] {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
+                        assertEquals(before.worldOffsets(Orientation.orient(face, facing, original.orientationMode())),
+                                after.worldOffsets(Orientation.orient(face, facing, imported.orientationMode())));
+                    }
+                }
+                draft.rotateClockwise();
+                assertTrue(draft.undo());
+                assertEquals(imported, draft.evaluate(ShapeLimits.DEFAULT).config());
+                assertFalse(draft.canUndo());
+                ShapeConfig reopened = EditorDraft.fromConfig(imported).evaluate(ShapeLimits.DEFAULT).config();
+                assertEquals(imported, reopened);
+                draft.setType(original.type());
+                assertEquals(ShapeTransform.IDENTITY, draft.transform());
+            }
+        }
+    }
+
     @Test void customIconKeepsTheTemplatesModeAndWorldSelectionForEveryHitAndFacing() {
         for (ShapeType type : ShapeType.values()) {
             if (type == ShapeType.CUSTOM) continue;

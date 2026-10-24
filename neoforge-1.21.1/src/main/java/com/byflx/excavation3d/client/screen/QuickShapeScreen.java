@@ -255,10 +255,8 @@ public final class QuickShapeScreen extends Screen {
             g.pose().popPose();
             line(g, entry.name(), l.labelX(segment), l.labelY(segment) + 8 * l.scale(),
                     l.labelWidth(segment), 0.65 * l.scale(), color);
-            double shortcutRadius = l.radius() - 11 * l.scale();
             line(g, Component.literal(Integer.toString(segment + 1)),
-                    l.centerX() + Math.cos(l.angle(segment)) * shortcutRadius,
-                    l.centerY() + Math.sin(l.angle(segment)) * shortcutRadius - 3 * l.scale(),
+                    l.shortcutX(segment), l.shortcutY(segment),
                     10 * l.scale(), 0.6 * l.scale(), alpha(MUTED, fade));
         }
         renderHub(g, l, selected < 0 ? null : entries.get(selected), fade);
@@ -288,7 +286,8 @@ public final class QuickShapeScreen extends Screen {
         if (deletion.pending() != null || hovered.entry().kind() == QuickMenuLogic.Kind.HINT) {
             Component message = deletion.pending() == null ? hovered.name()
                     : Component.translatable("gui.excavation3d.quick.delete_confirm", deletion.pending());
-            var lines = font.split(message, 70);
+            var lines = font.split(Component.literal(QuickMenuLogic.singleLine(message.getString()))
+                    .withStyle(message.getStyle()), 70);
             g.pose().pushPose();
             g.pose().translate(cx, cy - lines.size() * 3 * s, 0);
             g.pose().scale((float) (0.6 * s), (float) (0.6 * s), 1);
@@ -329,9 +328,10 @@ public final class QuickShapeScreen extends Screen {
 
     /** Fits the complete name in at most two lines; segment labels may still abbreviate. */
     private void fullName(GuiGraphics g, Component name, double x, double y, double scale, int color) {
-        int wrapWidth = Math.max(40, (font.width(name) + 1) / 2);
-        var lines = font.split(name, wrapWidth);
-        while (lines.size() > 2) lines = font.split(name, ++wrapWidth);
+        var lines = QuickMenuLogic.wrapName(name.getString(),
+                text -> font.width(Component.literal(text).withStyle(name.getStyle())),
+                (text, wrapWidth) -> font.split(Component.literal(text).withStyle(name.getStyle()), wrapWidth),
+                text -> Component.literal(text).withStyle(name.getStyle()).getVisualOrderText());
         int widest = lines.stream().mapToInt(font::width).max().orElse(1);
         float textScale = (float) Math.min(0.7 * scale, 36 * scale / Math.max(1, widest));
         g.pose().pushPose();

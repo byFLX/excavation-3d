@@ -27,6 +27,28 @@ class PresetRepositoryTest {
         return List.copyOf(result);
     }
 
+    @Test void readingSanitizesNamesAndSkipsThoseMadeEmptyWithoutChangingSaveOrder() throws Exception {
+        Path file = directory.resolve("control-names.json");
+        JsonObject entries = new JsonObject();
+        var order = new com.google.gson.JsonArray();
+        for (String name : List.of("Zulu", " a\nb\rc ", "\u0000\t\n\r\u0085\u2028\u2029", "A\u0001\u007f\u009f\u2028\u2029B", "Alpha")) {
+            entries.add(name, ShapeCodecs.CONFIG_CODEC.encodeStart(JsonOps.INSTANCE, shape(2)).getOrThrow());
+            order.add(name);
+        }
+        JsonObject root = new JsonObject();
+        root.addProperty("defaultsSeeded", true);
+        root.add("presets", entries);
+        root.add("order", order);
+        Files.writeString(file, root.toString());
+        var repository = PresetRepository.load(file);
+        assertEquals(List.of("Zulu", "abc", "AB", "Alpha"), repository.names());
+        assertEquals(shape(2), repository.find("abc").orElseThrow());
+        assertEquals(PresetRepository.SaveResult.INVALID_NAME, repository.save("\n\u2028\u0001", shape(3)));
+        assertEquals(PresetRepository.SaveResult.SAVED, repository.save("new\n\t\u2028name", shape(3)));
+        assertEquals(List.of("Zulu", "abc", "AB", "Alpha", "newname"), PresetRepository.load(file).names());
+        assertEquals(shape(3), repository.find("newname").orElseThrow());
+    }
+
     @Test void missingFileSeedsAndPersistsDefaultsExactlyOnce() throws Exception {
         Path file = directory.resolve("config/presets.json");
         assertFalse(Files.exists(file));

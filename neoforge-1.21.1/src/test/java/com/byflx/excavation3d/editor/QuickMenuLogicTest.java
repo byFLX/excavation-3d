@@ -9,6 +9,53 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class QuickMenuLogicTest {
+    @Test void shortcutBoxesNeverOverlapNameBoundsAtAnySegmentCountOrScale() {
+        for (int height : new int[] {60, 120, 240, 360, 1080}) {
+            for (int count = 1; count <= 66; count++) {
+                int pages = QuickMenuLogic.layout(427, height, count, 0).pages();
+                for (int page = 0; page < pages; page++) {
+                    var layout = QuickMenuLogic.layout(427, height, count, page);
+                    double s = layout.scale();
+                    for (int segment = 0; segment < layout.segments(); segment++) {
+                        double half = layout.labelWidth(segment) / 2;
+                        assertTrue(half > 0);
+                        boolean separate = layout.labelX(segment) + half <= layout.shortcutX(segment) - 7 * s
+                                || layout.labelX(segment) - half >= layout.shortcutX(segment) + 7 * s
+                                || layout.labelY(segment) + 15 * s <= layout.shortcutY(segment) - 2 * s
+                                || layout.labelY(segment) + 7 * s >= layout.shortcutY(segment) + 8 * s;
+                        assertTrue(separate, "Shortcut overlaps a name: count=" + count + ", segment=" + segment);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test void hoverNameNormalizesExplicitBreaksBeforeMeasuringAndWrapping() {
+        String raw = "a\nb\rc\r\nd\u0085e\u2028f\u2029g";
+        String normalized = "a b c d e f g";
+        var lines = QuickMenuLogic.wrapName(raw, text -> {
+            assertEquals(normalized, text);
+            return 100;
+        }, (text, width) -> {
+            assertEquals(normalized, text);
+            assertEquals(50, width);
+            return List.of("a b c d", "e f g");
+        }, text -> { throw new AssertionError("Ordinary wrapping should succeed"); });
+        assertEquals(List.of("a b c d", "e f g"), lines);
+        assertEquals(normalized, QuickMenuLogic.fitText(raw, 100, String::length));
+    }
+
+    @Test void hoverNameWrapHasAHardBoundEvenWhenASplitterNeverFits() {
+        var attempts = new java.util.ArrayList<Integer>();
+        var lines = QuickMenuLogic.wrapName("a\nb\nc", text -> Integer.MAX_VALUE,
+                (text, width) -> {
+                    attempts.add(width);
+                    return List.of("a", "b", "c");
+                }, text -> text);
+        assertEquals(List.of(1073741824, Integer.MAX_VALUE), attempts);
+        assertEquals(List.of("a b c"), lines);
+    }
+
     @Test void crosshairAnchorAndEntireWheelFitAllEffectiveGuiScales() {
         for (int windowWidth : new int[] {854, 1280, 1920}) {
             for (int windowHeight : new int[] {480, 720, 1080}) {

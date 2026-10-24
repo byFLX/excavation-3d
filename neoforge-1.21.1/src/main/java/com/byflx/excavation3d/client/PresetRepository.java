@@ -70,11 +70,11 @@ public final class PresetRepository {
     }
 
     public Optional<ShapeConfig> find(String name) {
-        return Optional.ofNullable(presets.get(name.trim()));
+        return Optional.ofNullable(presets.get(sanitizeName(name)));
     }
 
     public SaveResult save(String rawName, ShapeConfig config) {
-        String name = rawName == null ? "" : rawName.trim();
+        String name = sanitizeName(rawName);
         if (name.isEmpty() || name.length() > MAX_NAME_LENGTH) {
             return SaveResult.INVALID_NAME;
         }
@@ -91,7 +91,7 @@ public final class PresetRepository {
 
     public boolean delete(String name) {
         Map<String, ShapeConfig> before = new LinkedHashMap<>(presets);
-        if (presets.remove(name.trim()) == null) {
+        if (presets.remove(sanitizeName(name)) == null) {
             return false;
         }
         if (write()) return true;
@@ -130,7 +130,7 @@ public final class PresetRepository {
             }
             for (String storedName : order) {
                 Map.Entry<String, JsonElement> entry = Map.entry(storedName, stored.get(storedName));
-                String name = entry.getKey().trim();
+                String name = sanitizeName(entry.getKey());
                 // Migration may add four seeds to an already-full file; never truncate saved favorites.
                 if (name.isEmpty() || name.length() > MAX_NAME_LENGTH) {
                     continue;
@@ -146,6 +146,15 @@ public final class PresetRepository {
         } catch (IOException | RuntimeException e) {
             LOGGER.warn("Could not read shape presets from {}", file, e);
         }
+    }
+
+    /** Strip persisted and newly entered control characters, including Unicode line separators. */
+    private static String sanitizeName(String rawName) {
+        if (rawName == null) return "";
+        StringBuilder clean = new StringBuilder();
+        rawName.codePoints().filter(c -> !Character.isISOControl(c)
+                && c != 0x2028 && c != 0x2029).forEach(clean::appendCodePoint);
+        return clean.toString().strip();
     }
 
     private void seedDefaults() {

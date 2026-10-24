@@ -139,8 +139,15 @@ class EditorDraftTest {
                 ShapeConfig.of(new ShapeParams.Custom(ShapeMask.full(2, 3, 2, new Cell(1, 2, 0)))));
         for (ShapeConfig config : configs) {
             EditorDraft draft = EditorDraft.fromConfig(config);
-            assertEquals(config.type() == ShapeType.CUSTOM ? config : config.withTransform(ShapeTransform.IDENTITY),
-                    draft.evaluate(ShapeLimits.DEFAULT).config(), config.toString());
+            if (config.type() == ShapeType.CUSTOM || config.transform().isIdentity()) {
+                assertEquals(config, draft.evaluate(ShapeLimits.DEFAULT).config(), config.toString());
+            } else {
+                assertEquals(ShapeType.CUSTOM, draft.type());
+                assertEquals(ShapeTransform.IDENTITY, draft.transform());
+                assertEquals(config.orientationMode(), draft.evaluate(ShapeLimits.DEFAULT).config().orientationMode());
+                assertEquals(((ShapeGenerator.Valid) ShapeGenerator.generate(config, ShapeLimits.DEFAULT)).shape().mask(),
+                        draft.evaluate(ShapeLimits.DEFAULT).shape().orElseThrow().mask(), config.toString());
+            }
         }
     }
 

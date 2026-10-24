@@ -110,7 +110,7 @@ public final class EditorDraft {
         if (editing) editSaved = true;
     }
 
-    /** Groups a size-field change and its accepted resize into one history step. */
+    /** Groups an edit and its consequential resize into one history step. */
     public void edit(Runnable action) {
         if (editing) {
             action.run();
@@ -155,6 +155,12 @@ public final class EditorDraft {
         draft.load(config.params());
         draft.type = config.type();
         draft.transform = config.type() == ShapeType.CUSTOM ? config.transform() : ShapeTransform.IDENTITY;
+        if (config.type() != ShapeType.CUSTOM && !config.transform().isIdentity()
+                && ShapeGenerator.generate(config, ShapeLimits.DEFAULT) instanceof ShapeGenerator.Valid valid) {
+            // Bake legacy transforms into the mask before template controls can discard them.
+            draft.load(new ShapeParams.Custom(valid.shape().mask(), config.orientationMode()));
+            draft.type = ShapeType.CUSTOM;
+        }
         draft.watchCustom();
         return draft;
     }

@@ -15,6 +15,65 @@ class EditorHistoryTest {
 
     private static ShapeConfig config(EditorDraft draft) { return draft.evaluate(LIMITS).config(); }
 
+    /** Mirrors the screen's mask-operation/automatic-resize transaction without any game runtime. */
+    private static void removeAndResize(EditorDraft draft, int x) {
+        draft.edit(() -> {
+            assertTrue(draft.custom().set(x, 0, 0, false));
+            draft.requestedCustomResize(LIMITS).filter(CustomMaskDraft.ResizeCheck::allowedWithoutConfirmation)
+                    .ifPresent(check -> assertTrue(draft.custom().resize(check.width(), check.height(), check.depth())));
+        });
+    }
+
+    @Test void removingTheLastCellOutsideAPendingShrinkAndItsResizeUndoAsOneAction() {
+        var bits = new java.util.BitSet();
+        bits.set(1);
+        bits.set(2);
+        EditorDraft draft = EditorDraft.fromConfig(ShapeConfig.of(new ShapeParams.Custom(
+                ShapeMask.of(3, 1, 1, bits, new Cell(1, 0, 0)))));
+        ShapeConfig original = config(draft);
+        draft.setText(EditorDraft.WIDTH, "2");
+        assertEquals(1, draft.requestedCustomResize(LIMITS).orElseThrow().lostCells());
+        removeAndResize(draft, 2);
+        assertEquals(2, draft.custom().width());
+        assertTrue(draft.evaluate(LIMITS).isValid());
+        ShapeConfig resized = config(draft);
+        assertTrue(draft.undo());
+        assertEquals(3, draft.custom().width());
+        assertTrue(draft.custom().get(2, 0, 0));
+        assertEquals("2", draft.text(EditorDraft.WIDTH));
+        assertEquals(1, draft.requestedCustomResize(LIMITS).orElseThrow().lostCells());
+        assertTrue(draft.redo());
+        assertTrue(draft.evaluate(LIMITS).isValid());
+        assertEquals(resized, config(draft));
+        assertTrue(draft.undo());
+        assertTrue(draft.undo());
+        assertEquals(original, config(draft));
+        assertTrue(draft.evaluate(LIMITS).isValid());
+        assertFalse(draft.canUndo());
+    }
+
+    @Test void aResizeTriggeredByALaterCellInAPaintStrokeStaysInTheStrokeHistoryStep() {
+        EditorDraft draft = EditorDraft.fromConfig(ShapeConfig.of(new ShapeParams.Custom(
+                ShapeMask.full(4, 1, 1, new Cell(1, 0, 0)))));
+        draft.setText(EditorDraft.WIDTH, "2");
+        draft.custom().beginStroke();
+        removeAndResize(draft, 2);
+        assertEquals(4, draft.custom().width());
+        removeAndResize(draft, 3);
+        draft.custom().endStroke();
+        assertEquals(2, draft.custom().width());
+        assertTrue(draft.evaluate(LIMITS).isValid());
+        assertTrue(draft.undo());
+        assertEquals(4, draft.custom().width());
+        assertTrue(draft.custom().get(2, 0, 0));
+        assertTrue(draft.custom().get(3, 0, 0));
+        assertEquals(2, draft.requestedCustomResize(LIMITS).orElseThrow().lostCells());
+        assertTrue(draft.redo());
+        assertEquals(2, draft.custom().width());
+        assertEquals(2, draft.custom().count());
+        assertTrue(draft.evaluate(LIMITS).isValid());
+    }
+
     @Test void rotationOnAnOpenedCustomShapeIsTheFirstUndoStep() {
         EditorDraft draft = openedCustom();
         ShapeConfig before = config(draft);

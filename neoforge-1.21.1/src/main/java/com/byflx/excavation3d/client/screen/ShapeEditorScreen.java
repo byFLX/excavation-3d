@@ -570,15 +570,15 @@ public final class ShapeEditorScreen extends Screen {
                 new DropdownMenu.Entry(Component.translatable("gui.excavation3d.layer.paste"),
                         () -> draft.custom().hasClipboard(), () -> {
                             closeMenu();
-                            customEdited(draft.custom().pasteLayer(layer));
+                            customEdited(() -> draft.custom().pasteLayer(layer));
                         }, null),
                 DropdownMenu.Entry.of(Component.translatable("gui.excavation3d.layer.fill"), () -> {
                     closeMenu();
-                    customEdited(draft.custom().fillLayer(layer, true));
+                    customEdited(() -> draft.custom().fillLayer(layer, true));
                 }),
                 DropdownMenu.Entry.of(Component.translatable("gui.excavation3d.layer.clear"), () -> {
                     closeMenu();
-                    customEdited(draft.custom().fillLayer(layer, false));
+                    customEdited(() -> draft.custom().fillLayer(layer, false));
                 }));
         int menuW = Math.max(layerMenuButton.getWidth(), 90);
         menu = new DropdownMenu(layerMenuButton.getX(), layerMenuButton.getY() + 20, menuW, 0, height - 4, entries,
@@ -678,12 +678,14 @@ public final class ShapeEditorScreen extends Screen {
         scroll = Mth.clamp(scroll, 0, maxScroll());
     }
 
-    private void customEdited(boolean changedSomething) {
-        if (changedSomething) {
-            // Painting or moving the anchor can change what a pending shrink would lose.
-            handleCustomResize();
-            changed();
-        }
+    private void customEdited(java.util.function.BooleanSupplier action) {
+        draft.edit(() -> {
+            if (action.getAsBoolean()) {
+                // Start the transaction before changing the mask, including any lossless resize.
+                handleCustomResize();
+                changed();
+            }
+        });
     }
 
     private void setLayer(int newLayer) {
@@ -1069,7 +1071,7 @@ public final class ShapeEditorScreen extends Screen {
             if (anchorMode && button == 0) {
                 if (draft.custom().get(cell.x(), cell.y(), cell.z())) {
                     anchorMode = false;
-                    customEdited(draft.custom().setAnchor(cell.x(), cell.y(), cell.z()));
+                    customEdited(() -> draft.custom().setAnchor(cell.x(), cell.y(), cell.z()));
                     refresh();
                 }
                 return true;
@@ -1200,7 +1202,7 @@ public final class ShapeEditorScreen extends Screen {
 
     /** Sets, never toggles, so dragging over a cell twice keeps it as painted (plan §6.5). */
     private void paint(Cell cell) {
-        customEdited(draft.custom().set(cell.x(), cell.y(), cell.z(), paintValue));
+        customEdited(() -> draft.custom().set(cell.x(), cell.y(), cell.z(), paintValue));
     }
 
     private GeneratedShape customPreview() {
@@ -1240,9 +1242,9 @@ public final class ShapeEditorScreen extends Screen {
             Cell cell = CustomCanvas.toDraft(target, custom.width(), custom.height(), draft.transform());
             if (anchorMode && button == 0) {
                 anchorMode = false;
-                customEdited(custom.setAnchor(cell.x(), cell.y(), cell.z()));
+                customEdited(() -> custom.setAnchor(cell.x(), cell.y(), cell.z()));
                 refresh();
-            } else if (!anchorMode) customEdited(custom.set(cell.x(), cell.y(), cell.z(), button == 0));
+            } else if (!anchorMode) customEdited(() -> custom.set(cell.x(), cell.y(), cell.z(), button == 0));
         });
     }
 
