@@ -80,6 +80,9 @@ public final class ShapeEditorScreen extends Screen {
     private final PreviewCamera camera = new PreviewCamera();
     private final ShapePreviewRenderer preview = new ShapePreviewRenderer();
     private final PreviewGesture previewGesture = new PreviewGesture();
+    private boolean preservePreviewClick;
+    private Component previewNotice;
+    private long previewNoticeUntil;
 
     private final SessionHandshake handshake = new SessionHandshake();
     private long revision;
@@ -164,7 +167,7 @@ public final class ShapeEditorScreen extends Screen {
     @Override
     protected void init() {
         cancelPointer();
-        previewGesture.reset();
+        if (!preservePreviewClick) previewGesture.reset();
         scrolledWidgets.clear();
         stepButtons.clear();
         previewWidgets.clear();
@@ -224,6 +227,7 @@ public final class ShapeEditorScreen extends Screen {
             default -> {
             }
         }
+        if (draft.type() != ShapeType.CUSTOM && draft.canRedo()) y = historyRow(y);
         contentHeight = y - contentTop;
         layoutGrid();
         scroll = Mth.clamp(scroll, 0, maxScroll());
@@ -313,20 +317,7 @@ public final class ShapeEditorScreen extends Screen {
         anchorButton = tools.get(1);
         y += ROW;
 
-        List<Button> history = buttonRow(y,
-                Button.builder(Component.translatable("gui.excavation3d.undo"), b -> {
-                    if (draft.custom().undo()) {
-                        afterCustomStructureChange();
-                    }
-                }),
-                Button.builder(Component.translatable("gui.excavation3d.redo"), b -> {
-                    if (draft.custom().redo()) {
-                        afterCustomStructureChange();
-                    }
-                }));
-        undoButton = history.get(0);
-        redoButton = history.get(1);
-        y += ROW;
+        y = historyRow(y);
 
         resizeBaseY = y;
         List<Button> resize = buttonRow(y,
@@ -335,6 +326,28 @@ public final class ShapeEditorScreen extends Screen {
         resizeConfirmButton = resize.get(0);
         resizeCancelButton = resize.get(1);
         return y + (pendingResize != null ? ROW : 0) + 2;
+    }
+
+    private int historyRow(int y) {
+        List<Button> history = buttonRow(y,
+                Button.builder(Component.translatable("gui.excavation3d.undo"), b -> history(false)),
+                Button.builder(Component.translatable("gui.excavation3d.redo"), b -> history(true)));
+        undoButton = history.get(0);
+        redoButton = history.get(1);
+        return y + ROW;
+    }
+
+    private void history(boolean redo) {
+        ShapeType before = draft.type();
+        if (!(redo ? draft.redo() : draft.undo())) return;
+        previewNotice = null;
+        if (draft.type() != before) {
+            anchorMode = false;
+            pendingResize = null;
+            scroll = 0;
+            saveState.edited();
+            rebuildWidgets();
+        } else afterCustomStructureChange();
     }
 
     private List<Button> buttonRow(int y, Button.Builder... builders) {
@@ -404,8 +417,7 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private List<Component> controlHints() {
-        return List.of(Component.translatable(draft.type() == ShapeType.CUSTOM
-                ? "gui.excavation3d.preview.custom_edit" : "gui.excavation3d.preview.camera"));
+        return List.of(Component.translatable("gui.excavation3d.preview.custom_edit"));
     }
 
     private void drawWrapped(GuiGraphics graphics, Component text, int y, int maxWidth, int color) {
@@ -709,8 +721,10 @@ public final class ShapeEditorScreen extends Screen {
         sizeEdited = false;
         shape.ifPresent(s -> lastValid = s);
         if (undoButton != null) {
-            undoButton.active = draft.custom().canUndo();
-            redoButton.active = draft.custom().canRedo();
+            undoButton.active = draft.canUndo();
+            redoButton.active = draft.canRedo();
+        }
+        if (anchorButton != null) {
             anchorButton.setMessage(Component.translatable(anchorMode
                     ? "gui.excavation3d.anchor.picking" : "gui.excavation3d.anchor"));
         }
@@ -1014,7 +1028,7 @@ public final class ShapeEditorScreen extends Screen {
         if (super.mouseClicked(mx, my, button)) {
             return true;
         }
-        if ((button == 0 || (button == 1 && draft.type() == ShapeType.CUSTOM)) && inPreview(mx, my)) {
+        if ((button == 0 || button == 1) && inPreview(mx, my)) {
             setFocused(null);
             previewGesture.press(button, mx, my, true);
             return true;
@@ -1077,7 +1091,7 @@ public final class ShapeEditorScreen extends Screen {
         if (released == PreviewGesture.Release.RESET) {
             camera.reset();
             preview.resetScale();
-        } else if (released == PreviewGesture.Release.CLICK && draft.type() == ShapeType.CUSTOM) {
+        } else if (released == PreviewGesture.Release.CLICK) {
             editPreview(mx, my, button);
         }
         return released != PreviewGesture.Release.NONE || widgetReleased;
@@ -1125,7 +1139,31 @@ public final class ShapeEditorScreen extends Screen {
     }
 
     private void editPreview(double mx, double my, int button) {
-        preview.pick(mx, my, layer).ifPresent(hit -> {
+        if (draft.type() != ShapeType.CUSTOM && (evaluation == null || !evaluation.isValid())) {
+            previewNotice("gui.excavation3d.to_custom.invalid");
+            return;
+        }
+        preview.pick(mx, my, draft.type() == ShapeType.CUSTOM ? layer : 0).ifPresent(hit -> {
+            if (draft.type() != ShapeType.CUSTOM) {
+                switch (draft.editTemplatePreview(hit, button == 0, limits())) {
+                    case INVALID -> previewNotice("gui.excavation3d.to_custom.invalid");
+                    case LIMIT -> previewNotice("gui.excavation3d.quick.unavailable");
+                    case CHANGED -> {
+                        anchorMode = false;
+                        pendingResize = null;
+                        layer = 0;
+                        scroll = 0;
+                        saveState.edited();
+                        // Keep the first release available to the existing double-click reset gesture.
+                        preservePreviewClick = true;
+                        try { rebuildWidgets(); }
+                        finally { preservePreviewClick = false; }
+                        previewNotice("gui.excavation3d.to_custom.switched");
+                    }
+                    case UNCHANGED -> { }
+                }
+                return;
+            }
             Cell target = anchorMode || button == 1 ? (hit.selected() ? hit.cell() : null)
                     : PreviewPicking.addTarget(hit, customPreview().mask()).orElse(null);
             if (target == null) return;
@@ -1137,6 +1175,11 @@ public final class ShapeEditorScreen extends Screen {
                 refresh();
             } else if (!anchorMode) customEdited(custom.set(cell.x(), cell.y(), cell.z(), button == 0));
         });
+    }
+
+    private void previewNotice(String key) {
+        previewNotice = Component.translatable(key);
+        previewNoticeUntil = Util.getMillis() + 2000;
     }
 
     // ---------------------------------------------------------------- rendering
@@ -1291,7 +1334,8 @@ public final class ShapeEditorScreen extends Screen {
         if (shown != null) {
             // Only the scene between the caption and hint strips, so the shape and its labels never cover them.
             preview.render(graphics, font, previewX0 + 1, sceneY0, previewX1 - 1, sceneY1, shown, camera,
-                    false, custom, layer, mouseX, mouseY, anchorMode);
+                    false, custom, custom ? layer : 0, mouseX, mouseY, anchorMode,
+                    custom || (evaluation != null && evaluation.isValid()));
         }
         graphics.enableScissor(previewX0 + 1, previewY0 + 1, previewX1 - 1, previewY1 - 1);
         if (!custom && current == null && lastValid != null) {
@@ -1329,6 +1373,10 @@ public final class ShapeEditorScreen extends Screen {
         Component problem = applyProblem();
         Component message = problem != null ? problem : status;
         int color = currentProblem() != null ? ERROR : statusColor;
+        if (previewNotice != null && Util.getMillis() < previewNoticeUntil) {
+            message = previewNotice;
+            color = TEXT;
+        }
         List<FormattedCharSequence> lines = font.split(message, width - 2 * MARGIN);
         for (int i = 0; i < Math.min(2, lines.size()); i++) {
             graphics.drawString(font, lines.get(i), leftX, statusY + i * font.lineHeight, color);

@@ -74,6 +74,12 @@ public final class PreviewPicking {
 
     /** Selected cubes take precedence over transparent ghosts; otherwise pick the current layer or floor. */
     public static Optional<Hit> pick(Camera camera, double mx, double my, ShapeMask mask, int layer) {
+        return pick(camera, mx, my, mask, layer, false);
+    }
+
+    /** Templates also expose the one-cell floor border for the first edit. */
+    public static Optional<Hit> pick(Camera camera, double mx, double my, ShapeMask mask, int layer,
+            boolean template) {
         Ray ray = camera.ray(mx, my);
         Hit best = null;
         for (Cell cell : mask.positions()) {
@@ -90,14 +96,23 @@ public final class PreviewPicking {
             double t = -ray.origin.y / ray.direction.y;
             Vec p = ray.origin.plus(ray.direction.times(t));
             Cell cell = new Cell((int)Math.floor(p.x), 0, (int)Math.floor(p.z));
-            if (t >= 0 && inside(mask, cell)) return Optional.of(new Hit(cell, Face.UP, false, t));
+            boolean floorInside = template ? cell.x() >= -1 && cell.x() <= mask.width()
+                    && cell.z() >= -1 && cell.z() <= mask.depth() : inside(mask, cell);
+            if (t >= 0 && floorInside) return Optional.of(new Hit(cell, Face.UP, false, t));
         }
         return Optional.empty();
     }
 
     public static Optional<Cell> addTarget(Hit hit, ShapeMask mask) {
+        return addTarget(hit, mask, false);
+    }
+
+    public static Optional<Cell> addTarget(Hit hit, ShapeMask mask, boolean template) {
         Cell c = hit.selected ? hit.face.neighbour(hit.cell) : hit.cell;
-        return inside(mask, c) && !mask.contains(c.x(), c.y(), c.z()) ? Optional.of(c) : Optional.empty();
+        boolean inCanvas = template ? c.x() >= -1 && c.x() <= mask.width()
+                && c.y() >= -1 && c.y() <= mask.height() && c.z() >= -1 && c.z() <= mask.depth()
+                : inside(mask, c);
+        return inCanvas && !mask.contains(c) ? Optional.of(c) : Optional.empty();
     }
 
     private static boolean inside(ShapeMask mask, Cell c) {

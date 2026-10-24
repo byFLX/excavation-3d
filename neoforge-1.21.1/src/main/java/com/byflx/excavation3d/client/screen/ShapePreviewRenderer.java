@@ -68,13 +68,14 @@ public final class ShapePreviewRenderer {
     private long highlightStart;
     private PreviewPicking.Camera pickingCamera;
     private ShapeMask pickingMask;
+    private boolean templatePicking;
     private int pickX0, pickY0, pickX1, pickY1;
 
     public Optional<PreviewPicking.Hit> pick(double x, double y, int layer) {
         if (pickingCamera == null || x < pickX0 || x >= pickX1 || y < pickY0 || y >= pickY1) {
             return Optional.empty();
         }
-        return PreviewPicking.pick(pickingCamera, x, y, pickingMask, layer);
+        return PreviewPicking.pick(pickingCamera, x, y, pickingMask, layer, templatePicking);
     }
 
     /** Forgets the block scale, so the next frame fits the shape again (double-click reset). */
@@ -100,7 +101,8 @@ public final class ShapePreviewRenderer {
      */
     public void render(GuiGraphics graphics, Font font, int x0, int y0, int x1, int y1, GeneratedShape shape,
             PreviewCamera camera, boolean resultView, boolean custom, int layer, double mouseX, double mouseY,
-            boolean anchorMode) {
+            boolean anchorMode, boolean editable) {
+        templatePicking = !custom;
         if (!shape.equals(cachedShape) || resultView != cachedResultView) {
             rebuild(shape, resultView);
             cachedShape = shape;
@@ -134,7 +136,7 @@ public final class ShapePreviewRenderer {
 
         VertexConsumer consumer = graphics.bufferSource().getBuffer(RenderType.gui());
         drawGrid(consumer, matrix, w, d);
-        if (custom) {
+        if (custom || editable) {
             outline(consumer, matrix, 0, 0, 0, w, h, d, 0.015F, 0x668DA9C0);
             for (Cell ghost : CustomCanvas.ghosts(shape.mask(), layer)) {
                 outline(consumer, matrix, ghost.x(), ghost.y(), ghost.z(),
@@ -149,7 +151,7 @@ public final class ShapePreviewRenderer {
         }
         if (!resultView) {
             drawHighlight(consumer, matrix, shape, active);
-            if (custom) {
+            if (editable) {
                 pick(mouseX, mouseY, layer).ifPresent(hit -> {
                     if (anchorMode) {
                         if (hit.selected()) outlineCell(consumer, matrix, hit.cell(), 0xFFF1C232);
@@ -157,7 +159,7 @@ public final class ShapePreviewRenderer {
                         if (hit.selected() && !hit.cell().equals(shape.anchor())) {
                             outlineCell(consumer, matrix, hit.cell(), 0xFFFF2020);
                         }
-                        PreviewPicking.addTarget(hit, shape.mask())
+                        PreviewPicking.addTarget(hit, shape.mask(), templatePicking)
                                 .ifPresent(cell -> outlineCell(consumer, matrix, cell, 0xFF20FF20));
                     }
                 });

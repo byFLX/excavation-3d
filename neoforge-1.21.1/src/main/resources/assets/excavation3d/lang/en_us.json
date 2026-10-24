@@ -98,6 +98,7 @@
   "gui.excavation3d.rotate": "Rotate 90°",
   "gui.excavation3d.mirror": "Mirror",
   "gui.excavation3d.to_custom.invalid": "Fix the shape first",
+  "gui.excavation3d.to_custom.switched": "Switched to Custom",
   "gui.excavation3d.layer": "Layer",
   "gui.excavation3d.layer.grid": "2D layer %s (editable)",
   "gui.excavation3d.layer.menu": "Layer ▾",

@@ -81,4 +81,28 @@ class PreviewPickingTest {
         assertTrue(PreviewPicking.isDrag(10, 10, 14, 10));
         assertTrue(PreviewPicking.isDrag(10, 10, 13, 13));
     }
+
+    @Test void templateFacesExposeOutsideNeighboursWhileCustomKeepsItsCanvasBounds() {
+        ShapeMask mask = ShapeMask.full(1, 1, 1, new Cell(0, 0, 0));
+        var camera = new PreviewPicking.Camera(100, 100, 20, 0, 0, 1, 1, 1);
+        var hit = PreviewPicking.pick(camera, 100, 100, mask, 0, true).orElseThrow();
+        assertTrue(hit.selected());
+        assertEquals(new Cell(0, 0, -1), PreviewPicking.addTarget(hit, mask, true).orElseThrow());
+        assertTrue(PreviewPicking.addTarget(hit, mask).isEmpty());
+    }
+
+    @Test void templateFloorPickingExposesOnlyOneCellBeyondEachSide() {
+        ShapeMask mask = ShapeMask.full(1, 1, 1, new Cell(0, 0, 0));
+        var camera = new PreviewPicking.Camera(100, 100, 20, 0, 90, 1, 1, 1);
+        for (Cell cell : new Cell[] {new Cell(-1, 0, 0), new Cell(1, 0, 0),
+                new Cell(0, 0, -1), new Cell(0, 0, 1)}) {
+            var point = camera.project(new PreviewPicking.Vec(cell.x() + .5, 0, cell.z() + .5));
+            var floor = PreviewPicking.pick(camera, point.x(), point.y(), mask, 0, true).orElseThrow();
+            assertFalse(floor.selected());
+            assertEquals(cell, PreviewPicking.addTarget(floor, mask, true).orElseThrow());
+            assertTrue(PreviewPicking.pick(camera, point.x(), point.y(), mask, 0).isEmpty());
+        }
+        var outside = camera.project(new PreviewPicking.Vec(-1.5, 0, .5));
+        assertTrue(PreviewPicking.pick(camera, outside.x(), outside.y(), mask, 0, true).isEmpty());
+    }
 }

@@ -1,10 +1,14 @@
 package com.byflx.excavation3d.editor;
 
+import com.byflx.excavation3d.preview.CustomCanvas;
+import com.byflx.excavation3d.preview.PreviewPicking;
+import com.byflx.excavation3d.shape.Cell;
 import com.byflx.excavation3d.shape.GeneratedShape;
 import com.byflx.excavation3d.shape.NumericInput;
 import com.byflx.excavation3d.shape.ShapeConfig;
 import com.byflx.excavation3d.shape.ShapeGenerator;
 import com.byflx.excavation3d.shape.ShapeLimits;
+import com.byflx.excavation3d.shape.ShapeMask;
 import com.byflx.excavation3d.shape.ShapeParams;
 import com.byflx.excavation3d.shape.ShapeTemplates;
 import com.byflx.excavation3d.shape.ShapeTransform;
@@ -57,6 +61,16 @@ public final class EditorDraft {
     private boolean corridorUpward = true;
     private ShapeTransform transform = ShapeTransform.IDENTITY;
     private CustomMaskDraft custom = CustomMaskDraft.empty(3, 3, 1);
+    private record TemplateState(ShapeType type, Map<String, String> texts, boolean ascending,
+            boolean upward, ShapeTransform transform) { }
+    private record PreviewConversion(TemplateState template, CustomMaskDraft previous,
+            CustomMaskDraft converted) { }
+    // Each converted grid owns its later edit history. The template boundary sits below that history.
+    private final Map<CustomMaskDraft, PreviewConversion> previewConversions = new LinkedHashMap<>();
+    private PreviewConversion previewRedo;
+    private ShapeTransform redoTransform;
+
+    public enum PreviewEdit { CHANGED, UNCHANGED, INVALID, LIMIT }
 
     private EditorDraft() {
         for (ShapeType t : ShapeType.values()) {
@@ -94,6 +108,7 @@ public final class EditorDraft {
     }
 
     public void setType(ShapeType type) {
+        previewRedo = null;
         this.type = Objects.requireNonNull(type, "type");
     }
 
@@ -102,6 +117,7 @@ public final class EditorDraft {
     }
 
     public void setText(String field, String text) {
+        previewRedo = null;
         texts.get(type).put(field, text == null ? "" : text);
     }
 
@@ -110,6 +126,7 @@ public final class EditorDraft {
     }
 
     public void setStairAscending(boolean ascending) {
+        previewRedo = null;
         stairAscending = ascending;
     }
 
@@ -118,6 +135,7 @@ public final class EditorDraft {
     }
 
     public void setCorridorUpward(boolean upward) {
+        previewRedo = null;
         corridorUpward = upward;
     }
 
@@ -126,10 +144,12 @@ public final class EditorDraft {
     }
 
     public void rotateClockwise() {
+        previewRedo = null;
         transform = transform.rotatedClockwise();
     }
 
     public void toggleMirror() {
+        previewRedo = null;
         transform = transform.toggledMirror();
     }
 
@@ -139,11 +159,13 @@ public final class EditorDraft {
 
     /** Fills the cuboid fields as a surface template: depth 1 (plan §6.1). */
     public void applySurfaceTemplate() {
+        previewRedo = null;
         texts.get(ShapeType.CUBOID).put(DEPTH, "1");
     }
 
     /** Fills the cuboid fields as a line template along the width: height and depth 1 (plan §6.1). */
     public void applyLineTemplate() {
+        previewRedo = null;
         texts.get(ShapeType.CUBOID).put(HEIGHT, "1");
         texts.get(ShapeType.CUBOID).put(DEPTH, "1");
     }
@@ -214,21 +236,105 @@ public final class EditorDraft {
      * can be restored. Returns false when the current template is invalid or already custom.
      */
     public boolean convertToCustom(ShapeLimits limits) {
+        Optional<ShapeMask> mask = templateMask(limits);
+        if (mask.isEmpty()) return false;
+        previewRedo = null;
+        custom.replaceWith(mask.get());
+        syncCustomTexts();
+        type = ShapeType.CUSTOM;
+        return true;
+    }
+
+    /** Shared local conversion for the Custom icon and the first preview edit. */
+    private Optional<ShapeMask> templateMask(ShapeLimits limits) {
         if (type == ShapeType.CUSTOM) {
-            return false;
+            return Optional.empty();
         }
         Map<String, NumericInput.Problem> errors = new LinkedHashMap<>();
         Map<String, Integer> values = parseFields(limits, errors);
         if (!errors.isEmpty()) {
-            return false;
+            return Optional.empty();
         }
         ShapeGenerator.Result local = ShapeGenerator.generate(ShapeConfig.of(params(values)), limits);
         if (!(local instanceof ShapeGenerator.Valid valid)) {
-            return false;
+            return Optional.empty();
         }
-        custom.replaceWith(valid.shape().mask());
+        return Optional.of(valid.shape().mask());
+    }
+
+    /** Converts and edits atomically; rejected clicks never change the type, grid or history. */
+    public PreviewEdit editTemplatePreview(PreviewPicking.Hit hit, boolean add, ShapeLimits limits) {
+        Optional<ShapeMask> local = templateMask(limits);
+        if (local.isEmpty()) return PreviewEdit.INVALID;
+        ShapeMask mask = local.get();
+        if (!add && !hit.selected()) return PreviewEdit.UNCHANGED;
+        Cell shownTarget = add && hit.selected() ? hit.face().neighbour(hit.cell()) : hit.cell();
+        Cell target = CustomCanvas.toDraft(shownTarget, mask.width(), mask.height(), transform);
+        if (mask.contains(target) == add || (!add && target.equals(mask.anchor()))) {
+            return PreviewEdit.UNCHANGED;
+        }
+        Optional<CustomCanvas.Growth> growth = CustomCanvas.growToInclude(mask, target, limits);
+        if (growth.isEmpty() || (add && mask.count() >= limits.maxSelected())) return PreviewEdit.LIMIT;
+        CustomCanvas.Growth grown = growth.get();
+        CustomMaskDraft edited = CustomMaskDraft.fromMask(grown.mask());
+        Cell cell = grown.target();
+        if (!edited.set(cell.x(), cell.y(), cell.z(), add)) return PreviewEdit.UNCHANGED;
+        // Start a fresh grid history at the edited mask. The boundary below is the single undo step.
+        CustomMaskDraft converted = CustomMaskDraft.fromMask(edited.toMask());
+        TemplateState before = new TemplateState(type, Map.copyOf(texts.get(type)), stairAscending,
+                corridorUpward, transform);
+        if (previewConversions.size() >= CustomMaskDraft.MAX_UNDO) {
+            previewConversions.remove(previewConversions.keySet().iterator().next());
+        }
+        previewConversions.put(converted, new PreviewConversion(before, custom, converted));
+        previewRedo = null;
+        custom = converted;
         syncCustomTexts();
         type = ShapeType.CUSTOM;
+        return PreviewEdit.CHANGED;
+    }
+
+    public boolean canUndo() {
+        return type == ShapeType.CUSTOM && (custom.canUndo() || previewConversions.containsKey(custom));
+    }
+
+    public boolean canRedo() {
+        return previewRedo != null || (type == ShapeType.CUSTOM && custom.canRedo());
+    }
+
+    public boolean undo() {
+        if (type != ShapeType.CUSTOM) return false;
+        if (custom.undo()) {
+            syncCustomTexts();
+            return true;
+        }
+        PreviewConversion conversion = previewConversions.get(custom);
+        if (conversion == null) return false;
+        redoTransform = transform;
+        previewRedo = conversion;
+        custom = conversion.previous();
+        syncCustomTexts();
+        TemplateState template = conversion.template();
+        type = template.type();
+        texts.get(type).clear();
+        texts.get(type).putAll(template.texts());
+        stairAscending = template.ascending();
+        corridorUpward = template.upward();
+        transform = template.transform();
+        return true;
+    }
+
+    public boolean redo() {
+        if (previewRedo != null) {
+            custom = previewRedo.converted();
+            transform = redoTransform;
+            type = ShapeType.CUSTOM;
+            previewRedo = null;
+            syncCustomTexts();
+            return true;
+        }
+        if (type != ShapeType.CUSTOM || !custom.redo()) return false;
+        syncCustomTexts();
         return true;
     }
 
