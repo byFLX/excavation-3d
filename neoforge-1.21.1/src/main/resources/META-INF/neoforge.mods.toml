@@ -1,25 +1,29 @@
 modLoader="javafml"
 loaderVersion="[4,)"
 license="MIT"
+issueTrackerURL="https://github.com/byFLX/excavation-3d/issues"
 
 [[mods]]
 modId="excavation3d"
 version="${version}"
 displayName="Excavation 3D"
 authors="byFLX"
-description='''Excavation shapes for normal pickaxes, shovels and axes, configured in game with numeric fields and a rotatable 3D block preview.'''
+displayURL="https://github.com/byFLX/excavation-3d"
+logoFile="logo.png"
+description='''Give your normal pickaxes, shovels and axes an excavation shape - tunnels, floors, stairs or your own block pattern - set up in game with a 3D preview and a quick wheel.'''
 
 [[dependencies.excavation3d]]
 modId="neoforge"
 type="required"
-versionRange="[21.1.219,)"
+# 21.1.229 closes a server crash exploit via crafted packets (NeoForge notice 2026-05-11); no newer API is needed.
+versionRange="[21.1.229,)"
 ordering="NONE"
 side="BOTH"
 
 [[dependencies.excavation3d]]
 modId="minecraft"
 type="required"
-versionRange="[1.21.1,1.22)"
+versionRange="[1.21.1]"
 ordering="NONE"
 side="BOTH"
 

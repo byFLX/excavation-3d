@@ -57,3 +57,6 @@ replay_*.log
 run/
 run-client-*/
 run-server/
+
+# local logs
+logs/

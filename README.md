@@ -1,59 +1,101 @@
 # Excavation 3D
 
-Standalone Minecraft 1.21.1 / NeoForge 21.1.x mod: normal mining tools (pickaxes, shovels, axes, also from other mods) get an excavation shape that is configured in game, with size controls and a rotatable 3D block preview. There is no own tool item. It does not depend on Create.
+Give your normal pickaxes, shovels and axes an excavation shape - a tunnel, a floor, stairs or your own block
+pattern - and set it up in game with a 3D preview and a quick wheel.
 
-- Plan and acceptance criteria: [docs/EXCAVATION_3D_PLAN.md](docs/EXCAVATION_3D_PLAN.md)
-- Acceptance matrix (automated evidence and open in-game checks): [docs/ACCEPTANCE_MATRIX.md](docs/ACCEPTANCE_MATRIX.md)
-- Gradle project: `neoforge-1.21.1/` (`./gradlew test build`; world-level Game Tests: `./gradlew runGameTestServer`)
-- Status: stages 1–5 of the plan are implemented (geometric core, editor with 3D preview, custom layer editor and favorites, tool data component with server-confirmed apply and world preview, server-side excavation), with the correction of plan §2a (shapes on normal tools, no own item). The in-game and multiplayer checks of stage 6 are listed as open in the acceptance matrix.
+## Requirements
 
-## Using the tools
+- Minecraft **1.21.1**
+- NeoForge **21.1.229** or newer
+- Java 21
+- Required on both the server and the client. No other mods needed.
 
-- Hold a pickaxe, shovel or axe and tap **V** to edit its shape. **Done** applies and enables it after server confirmation. Rejections stay visible in the editor. **Escape** closes without applying and asks before discarding edits.
-- Hold **V** for 250 ms to open the wheel. Move to an entry and release V, click, or use 1–8 on the current page; scroll to change pages. Segments show their 1–8 shortcuts, multi-page wheels say **Scroll for more**, and hovering shows the complete favorite name in the centre (up to two lines, scaled to fit). Release in the centre or press Escape to cancel.
-- The wheel always pins **Off** at the top of every page, followed by favorites in save order. **Tunnel 1×2**, **Tunnel 3×3**, **Floor 5×5** and **Stairs** are seeded once as ordinary favorites (see below). Off pauses the shape on this tool; selecting Off on a paused or unconfigured tool simply closes. Selecting any favorite applies and enables it, including a favorite matching the paused shape. A paused shape with no matching favorite adds **Resume** immediately after Off, with its stored thumbnail and block count; Resume re-enables that stored shape through the existing server-confirmed enabled-state path. Enabled or unconfigured tools have no Resume entry. The separate toggle binding still toggles as before.
-- The active entry has a gold-tinted segment fill, gold label and a check mark beside the label: Off when paused or unconfigured, otherwise the first matching favorite (ignoring revision). An enabled unmatched shape has no active wheel entry. Reopening starts on the active favorite's page. Hover adds a lighter fill, gold outline and outward expansion, including when the entry is also active. Two-entry wheels keep symmetric top/bottom halves and centre a horizontal icon/name row in each half; larger wheels keep icon/name stacks.
-- The inner circle shows only **Cancel** in the dead zone. Hovering a favorite or Resume shows its bold complete name (up to two lines), cached isometric thumbnail and small muted block count, vertically centred as one block with even gaps and padding inside the circle. Off shows **Off**, its icon and **Mine normally**. The crosshair, including its debug variant, is hidden while the wheel is open. Cached thumbnail faces use the GUI's winding so face culling does not hide them.
-- Right-click any favorite, including a seeded default, then right-click the same segment again to delete it. Moving away cancels. After a right-click, releasing V closes without applying; a left-click still selects. With no favorites, a disabled segment says **Save favorites in the editor (tap V).**
-- **Shift** mines a single block temporarily. While held, **Single block** takes priority over preview statistics and temporary feedback. Paused tools also mine single blocks and show **Off · <shape summary>** in grey. Shapes stay on their individual tool items. The low tool hint waits for vanilla’s selected-item name to disappear, then shows for 2.5 seconds and fades for 0.5 seconds; another item-name highlight pauses its remaining time.
-- In **Controls → Excavation 3D**, optional bindings toggle shape on/off, cycle Next/Previous favorite, apply favorite 1–5, or toggle world preview. Shape shortcuts use the same favorite order as the wheel (excluding Off, Resume and the empty hint); cycling wraps and starts at the first/last entry for paused or unmatched shapes. Empty slots do nothing. Shape changes use server confirmation.
-- World preview is a client preference: `worldPreview = true` in `config/excavation3d-client.toml`. The preview appears for an enabled held shape. Its shortcut saves the client setting immediately and shows “World preview: On/Off” in the tool hint. Old per-tool preview values are ignored.
-- Eligible tools are controlled by `excavation3d:shape_tools`, including vanilla pickaxe, shovel and axe tags. Excavation still respects tool suitability, protection and server limits.
+## What it adds
 
-## Editor and preview controls
+- **Shapes on the tools you already have.** Every pickaxe, shovel and axe (also from other mods, via the item tags)
+  can carry an excavation shape. There is no new tool item and no crafting recipe.
+- **Ready-made shapes:** Tunnel 1×2, Tunnel 3×3, Floor 5×5 and Stairs are there from the start.
+- **Shape editor** with Box, Plus, Stairs, Corridor and Custom shapes, size buttons, a rotatable 3D preview and full
+  Undo/Redo. Click blocks in the preview to add or remove them; build any pattern layer by layer in Custom mode.
+- **Quick wheel:** hold the editor key to pick a favorite shape or switch the shape off, without opening a screen.
+- **World preview:** an outline in the world shows exactly which blocks the next swing will mine.
+- **Fair mining:** a shape only mines blocks the held tool is meant for (a pickaxe digs stone, not wood). Drops,
+  durability, enchantments and protection work like normal mining, and the server spreads big excavations over
+  several ticks.
 
-- Choose a type, then use **− / +** or the wheel over its value or −/+ buttons to change the value by 1; hold **Shift** for 5. The label and other left-panel areas scroll the panel; its scrollbar can also be dragged. Values clamp to the server's axis range. Validation errors remain beside the affected row and disable Done.
-- In every type's 3D preview, left-click a cube face to add its neighbour, click a ghost/floor cell to add it, or right-click a cube to remove it. The start block stays selected. Left-dragging at least 4 GUI pixels rotates the camera; right-dragging cancels the click without rotating or editing. The wheel zooms. A left double-click resets the view and rolls back the first click’s edit, including conversion to Custom, without adding a redo entry. The preview summary shows dimensions and block count (two lines in a narrow column); size edits briefly flash added/removed blocks.
-- The first preview edit of **Box, Plus, Stairs or Corridor** converts the selection to **Custom** and briefly shows **Switched to Custom**. The canvas grows by one cell on the sides needed for the clicked neighbour, within server limits. Rejected edits show the limit message; invalid templates show **Fix the shape first.** One **Undo** restores the exact template type and settings; **Redo** remains available on that template to reapply the edit. Both this first edit and the Custom icon preserve the template’s world orientation: converted Stairs/Corridor retain world up and player facing, even for top/bottom hits.
-- The scrolling left column contains type icons, **Reset to defaults**, sizes, Direction (Stairs/Corridor) or Rotate/Mirror (Custom), and **Undo/Redo**. Custom then shows layer navigation (**current/total**), Layer tools, Set start, and the grid. The layer controls wrap to a second row when the column is too narrow. Done stays outside the scrolling column. The preview has no draft buttons; **Reset view** sits below it beside the size/count summary, and double-click still resets the camera.
-- **Reset to defaults** restores only the selected type from `ShapeTemplates.defaults`: sizes, direction, transform, and Custom start/mask (an empty 3×3 canvas). Other types and favorites stay intact. Reset is one undo step and changes the tool only after Done.
-- One chronological, bounded history (64 steps) covers template sizes/direction, accepted Custom resizes, paint strokes, start/layer edits, conversion, Rotate/Mirror and Reset. Each size click or wheel notch is a separate step; a field change and its immediate resize form one step. A new edit clears Redo. Type navigation alone creates no step; Undo returns to the type of the action being reversed. The Custom icon keeps the previous behavior: Undo restores the previous Custom canvas; undoing a first preview edit returns to its template.
-- Custom keeps its rotation/mirror when navigating between types; templates use identity transforms. Legacy transformed templates open as equivalent Custom masks, preserving their orientation mode. **Mirror: On/Off** shows reflection state, and Mirror flips the currently displayed horizontal shape axis after any rotation. Rotating the 3D camera is independent of the shape transform.
-- **Favorites ▾** opens a panel at the top right with a name field and **Save as favorite**, followed by favorites in the same order as the hold-V wheel. Each row shows its shape icon, name, muted size summary and **×**. The gold marker identifies the first favorite matching the draft (ignoring revision). Long names and summaries truncate with full-text tooltips. The panel fits the GUI size; scroll its list with the mouse wheel or drag its scrollbar. At small GUI sizes, a compact preview beside the panel keeps the selection visible while the controls are covered. Escape or a click outside dismisses it.
-- Click a favorite row to load it into the draft as **one Undo step**, mark the draft unsaved and prefill its name. The panel stays open with **Loaded <name>**, so the preview updates before applying anything to the tool. Edit the draft, reopen Favorites and press **Save as favorite** or Enter; **Overwrite <name>? Save again.** requires a second press of **Save as favorite** or Enter. Saving keeps the list open and refreshes it. Done is still required to apply the draft to the tool.
-- Click a row's **×** to show **Delete <name>? Click × again.**, then click that same **×** within three seconds to delete. Selecting, scrolling, closing the panel or choosing another delete target cancels the pending confirmation. Deleting updates the list and wheel order without changing the draft, its undo history or the tool. With no favorites, the panel explains how to save the current shape.
-- Favorites live in `config/excavation3d-presets.json`: new names append, overwrites retain their slots. Legacy files migrate once to alphabetical order. The wheel also supports selecting and deleting favorites.
-- On first load, a missing or false `defaultsSeeded` flag adds **Tunnel 1×2**, **Tunnel 3×3**, **Floor 5×5** and **Stairs** to the front in that order, then writes `defaultsSeeded: true`. Existing favorites keep their order; a matching English name keeps the user's configuration and slot. Files without an `order` array sort their existing favorites alphabetically first. Seeded favorites use these English names in every language. Deleting any or all favorites never restores the defaults. Migration preserves a full file even if the four seeds take it above the 64-favorite save limit; new names require fewer than 64 favorites.
-- **Floor 5×5 orientation:** the existing hit-face mapping sends local width across the player, local height along horizontal player facing, and local depth downward when hitting the ground. Its cuboid is therefore local **5×5×1**, yielding a level 25-block patch, rather than local 5×1×5 which would dig five blocks down. Stairs use their existing defaults and horizontal player orientation.
+## Getting started
 
-## Compatibility and remaining in-game checks
+1. Hold a pickaxe, shovel or axe.
+2. **Hold V**: the quick wheel opens. Move the mouse to a shape (e.g. **Tunnel 3×3**) and release V.
+3. Mine a block: the whole shape is excavated. The outline in the world shows it before you mine.
+4. **Tap V** to open the editor and change the shape. Press **Done** to put it on the tool. **Escape** closes
+   without changes.
 
-- Custom orientation is persisted as optional `player_horizontal` (absent/false keeps existing hit-face behavior). Both world preview and server excavation use the stored mode; geometric limits and server hit-face validation are unchanged. The network registrar version is now **5** for the added wire flag; clients and servers must use matching versions. The persisted shape format remains version 1.
-- In-game checks remain: small-window/high-GUI-scale scrolling and footer access; reset scope and Done/Escape behavior; ordered Undo/Redo across all controls; mirror after odd rotations; Reset view/double-click and zoom hints; wheel shortcuts/pages/long names; Shift hint priority; converted stairs/corridors in world preview and excavation, including after saving/reopening and in multiplayer.
-- Favorites overview in-game checks: small-GUI panel bounds and compact preview; long-name tooltips and scrollbar dragging through a full list; load/name prefill and one-step Undo/Redo; two-save overwrite; delete confirmation expiry/cancellation and the updated wheel order; empty state after deleting the last favorite; unchanged tool until Done.
-- Round 11 wheel checks: 2, 3 and 8+ entries at all GUI scales; Off remains top/active when paused and selecting it does not resume; matching favorites resume and unmatched paused shapes expose Resume; no Resume when enabled/unconfigured; toggle binding still toggles; deleting the paused shape's last matching favorite reveals Resume. Check readable gold tint/label/check versus hover, including both together, and the active entry after applying/reopening on later pages. Verify the cached thumbnail is visible, the crosshair returns after close, long two-line names/counts fit inside the hub, Off includes its explanation, and the dead zone shows only centred Cancel. Pure geometry/state tests and direct Java compilation can run with cached dependencies without invoking Gradle; visual and server-confirmation behavior still need the game.
+More controls:
 
-## Code layout (`com.byflx.excavation3d`)
+| Key | What it does |
+|---|---|
+| Hold **V** | Quick wheel: pick a favorite, **Off** pauses the shape (it stays on the tool) |
+| Tap **V** | Shape editor |
+| Hold **Shift** while mining | Mine a single block only |
+| In the wheel: right-click a favorite twice | Delete that favorite |
+| In the editor: **Favorites ▾** | Save the current shape, load, edit or delete favorites |
+| Optional keys (Controls → Excavation 3D) | Toggle shape, next/previous favorite, favorite 1-5, toggle world preview (unbound by default) |
 
-| Package | Content | Side |
+In creative mode, tools mine single blocks.
+
+## Configuration
+
+**Server** - `serverconfig/excavation3d-server.toml` in the world folder. No restart needed: edits are picked up
+while the server runs, and players get new size limits the next time they join.
+
+| Option | Default | Meaning |
 |---|---|---|
-| `shape` | Pure geometry: config, generator, validator, transforms, orientation, encoding | both |
-| `editor` | Editor draft and custom layer draft (undo/redo, resize) | both, pure |
-| `preview` | Preview geometry: world-preview contour and fill, editor block scale, size-change diff, label placement | both, pure |
-| `data`, `registry`, `config` | Data component and codecs, component registration and the `shape_tools` tag key, server config | both |
-| `net` | Payloads and server-side editor sessions | both (handlers per side) |
-| `excavation` | Server-side excavation and tick budgets | server logic |
-| `client` | Editor screen, 3D preview, world preview, hint, keys, presets | client only |
-| `gametest` | Game Tests for excavation in the world; only active on the Game Test server | server |
+| `limits.maxAxis` | 32 | Largest size of a shape along any axis, in blocks (1-32) |
+| `limits.maxSelected` | 4096 | Largest number of blocks in one shape (1-4096) |
+| `budget.perPlayerPerTick` | 32 | Positions checked per player and tick (1-4096) |
+| `budget.globalPerTick` | 256 | Positions checked per tick across all players (1-65536) |
 
-The scaffold uses the same ModDevGradle, NeoForge and JUnit versions as the byFLX Create Stock Instant Craft mod, so the Agent-Team's offline Gradle sandbox can build it from its existing dependency seed.
+**Client** - `config/excavation3d-client.toml`:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `worldPreview` | true | Show the held tool's shape as an outline in the world |
+
+Favorites are stored on your computer in `config/excavation3d-presets.json`, so they work on every server.
+
+**Tags:** `excavation3d:shape_tools` (item tag) decides which tools can carry a shape. It contains
+`#minecraft:pickaxes`, `#minecraft:shovels` and `#minecraft:axes`, and can be changed with a datapack.
+
+## Compatibility
+
+- Tested with NeoForge **21.1.229** and **21.1.265** on Minecraft 1.21.1 (build, unit tests, game tests, dedicated
+  server and client start). Details: [docs/TESTING.md](docs/TESTING.md).
+- Tools from other mods work when they are in the vanilla pickaxe, shovel or axe tags.
+- Block protection mods that cancel block breaking also stop the excavation of protected blocks.
+- No known conflicts. Other area-mining mods (e.g. vein miners) may react to the same block break; use one at a
+  time on the same tool.
+
+## Reporting issues
+
+Please open an issue at <https://github.com/byFLX/excavation-3d/issues> with:
+
+- Excavation 3D version, NeoForge version and Minecraft version
+- the other mods in your game or modpack
+- your log file (`logs/latest.log`, and the crash report if there is one)
+- the steps to reproduce the problem
+
+## Building from source
+
+```bash
+cd neoforge-1.21.1
+./gradlew build
+```
+
+The jar is `neoforge-1.21.1/build/libs/excavation3d-neoforge-1.21.1-<version>.jar`. Unit tests: `./gradlew test`,
+game tests: `./gradlew runGameTestServer`. Development notes: [docs/BEHAVIOUR_REFERENCE.md](docs/BEHAVIOUR_REFERENCE.md),
+[docs/EXCAVATION_3D_PLAN.md](docs/EXCAVATION_3D_PLAN.md).
+
+## License
+
+MIT, Copyright (c) 2026 byFLX. See [LICENSE](LICENSE).
