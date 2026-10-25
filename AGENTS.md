@@ -16,8 +16,9 @@ nur repo-spezifische Angaben und vom Betreiber genehmigte Abweichungen.
 - mod_id `excavation3d` · Gruppe `com.byflx` · Paket `com.byflx.excavation3d` · Version 1.0.0
 - Eigenständige Mod, kein `Create:`-Präfix.
 - Icon: `neoforge-1.21.1/src/main/resources/logo.png` (256×256). Quelle `docs/logo/make-logo.py` (nur
-  Python-Standardbibliothek, schreibt `logo-256.png` und `logo-512.png` neben sich; die 256er wird nach
-  `src/main/resources/logo.png` kopiert, die 512er ist das CurseForge-Projektbild).
+  Python-Standardbibliothek, schreibt `logo-c2-256.png`, `logo-c2-512.png` und eine 64er Vorschau neben sich;
+  die 256er wird nach `src/main/resources/logo.png` kopiert, die 512er als `docs/logo/logo-512.png` ist das
+  CurseForge-Projektbild). Motiv: isometrischer Steinwürfel mit gold umrandetem, ausgehobenem Stufen-Ausschnitt.
 
 ## Abhängigkeiten
 
