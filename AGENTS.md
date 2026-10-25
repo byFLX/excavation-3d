@@ -15,8 +15,9 @@ nur repo-spezifische Angaben und vom Betreiber genehmigte Abweichungen.
 - Werkzeuge: Gradle 9.2.1 · ModDevGradle 2.0.141 · Mappings Mojang
 - mod_id `excavation3d` · Gruppe `com.byflx` · Paket `com.byflx.excavation3d` · Version 1.0.0
 - Eigenständige Mod, kein `Create:`-Präfix.
-- Icon: `neoforge-1.21.1/src/main/resources/logo.png`, Quelle `docs/logo/make-logo.mjs` (512er Version für
-  CurseForge: `docs/logo/logo-512.png`).
+- Icon: `neoforge-1.21.1/src/main/resources/logo.png` (256×256). Quelle `docs/logo/make-logo.py` (nur
+  Python-Standardbibliothek, schreibt `logo-256.png` und `logo-512.png` neben sich; die 256er wird nach
+  `src/main/resources/logo.png` kopiert, die 512er ist das CurseForge-Projektbild).
 
 ## Abhängigkeiten
 
