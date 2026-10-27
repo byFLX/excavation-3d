@@ -18,7 +18,7 @@ Everything needed for the upload. The operator does the upload (MOD_STANDARDS §
 Screenshots are worth adding: the quick wheel, the editor with the 3D preview, and the world outline in front of a
 wall.
 
-## File
+## File (latest: 1.1.0)
 
 | Field | Value |
 |---|---|
@@ -31,7 +31,23 @@ wall.
 | Environment | Client and Server (required on both) |
 | Relations | none (no required or optional mod dependencies) |
 
-### Changelog (paste as Markdown)
+### Changelog 1.1.0 (paste as Markdown)
+
+```markdown
+**New: bundled drops.** The drops of a shape no longer lie scattered around:
+
+- **Inventory** (default): everything goes straight into your inventory as full stacks; what does not fit drops
+  as one pile at your feet. XP comes as one orb.
+- **Pile at start**: everything drops as one pile where you started mining.
+- **Vanilla**: drops stay where each block was, like before.
+
+Switch it in the editor (tap V, bottom left: "Drops: ...") or bind the optional "Cycle drop mode" key. Servers can
+force one mode with `drops.forceMode` in `excavation3d-server.toml`.
+
+Client and server must both use 1.1.0. Requires NeoForge 21.1.229 or newer on Minecraft 1.21.1.
+```
+
+### Changelog 1.0.0 (for reference)
 
 ```markdown
 First public release.
