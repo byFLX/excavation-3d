@@ -7,7 +7,7 @@ Everything needed for the upload. The operator does the upload (MOD_STANDARDS §
 | Field | Value |
 |---|---|
 | Name | Excavation 3D |
-| Summary | Area mining for your normal tools - tunnels, floors, stairs and custom shapes with a 3D preview. |
+| Summary | Area mining with your normal pickaxes, shovels and axes: tunnels, floors, stairs or custom 3D shapes with preview, quick wheel and bundled drops. |
 | Project image / avatar | `docs/logo/logo-512.png` |
 | Main category | Utility & QoL |
 | Additional categories | Armor, Tools, and Weapons |
@@ -69,43 +69,26 @@ Requires NeoForge 21.1.229 or newer on Minecraft 1.21.1.
 ```markdown
 # Excavation 3D
 
-Give your **normal pickaxes, shovels and axes** an excavation shape - a tunnel, a floor, stairs or your own
-block pattern - and set it up in game with a 3D preview and a quick wheel. No new tool item, no recipe.
+Area mining for the tools you already have: give any pickaxe, shovel or axe a shape and mine a whole tunnel,
+floor or staircase with one swing. No new item, no recipe.
 
 ## Features
 
-- **Works with the tools you already have** - vanilla tools and tools from other mods (via the vanilla tool tags).
-- **Ready-made shapes:** Tunnel 1×2, Tunnel 3×3, Floor 5×5 and Stairs.
-- **Shape editor:** Box, Plus, Stairs, Corridor and Custom shapes with size buttons, a rotatable 3D preview, Undo/Redo
-  and Reset. Click blocks in the preview to add or remove them, or build any pattern layer by layer.
-- **Quick wheel:** hold the editor key, pick a favorite or switch the shape off - without opening a screen.
-- **World preview:** an outline shows exactly which blocks the next swing will mine.
-- **Bundled drops:** the drops of a shape go straight into your inventory or land as one pile at the start block -
-  your choice in the editor (or vanilla scattering).
-- **Fair:** a shape only mines blocks the tool is meant for (a pickaxe digs stone, not wood). Drops, durability,
-  enchantments and block protection work like normal mining. Big shapes are spread over several ticks.
-
-## How to use
-
-1. Hold a pickaxe, shovel or axe.
-2. **Hold V** to open the quick wheel, point at a shape, release V.
-3. Mine - the whole shape is excavated.
-4. **Tap V** to open the editor and make your own shape. **Done** puts it on the tool.
-
-Hold **Shift** to mine a single block. More keys (toggle, next/previous favorite, favorite 1-5, world preview) can
-be bound under Controls → Excavation 3D.
-
-## Configuration
-
-Server: `serverconfig/excavation3d-server.toml` - maximum shape size and per-tick work budgets.
-Client: `config/excavation3d-client.toml` - world preview on/off.
+- **Works with normal tools** - vanilla and modded pickaxes, shovels and axes.
+- **Ready-made shapes:** Tunnel 1×2, Tunnel 3×3, Floor 5×5, Stairs.
+- **Shape editor** (tap **V**): Box, Plus, Stairs, Corridor and Custom shapes, 3D preview, click blocks to
+  add/remove, Undo/Redo, Reset, Rotate/Mirror.
+- **Favorites:** save, load, edit and delete your own shapes.
+- **Quick wheel** (hold **V**): switch shape or turn it off instantly.
+- **World preview:** an outline shows exactly what the next swing mines.
+- **Bundled drops:** straight into your inventory, as one pile at the start block, or vanilla - your choice.
+- **Fair mining:** only blocks the tool is meant for; Fortune, Silk Touch, durability and protection work as
+  normal. Hold **Shift** for a single block.
+- **Server-friendly:** size limits and per-tick budgets in the server config; drop mode can be forced.
 
 ## Requirements
 
-Minecraft 1.21.1 · NeoForge 21.1.229 or newer · install on **client and server**.
+Minecraft 1.21.1 · NeoForge 21.1.229+ · install on **client and server**.
 
-## Issues
-
-Please report problems on [GitHub](https://github.com/byFLX/excavation-3d/issues) with your mod, NeoForge and
-Minecraft versions, your mod list and `logs/latest.log`.
+Issues: [GitHub](https://github.com/byFLX/excavation-3d/issues)
 ```
