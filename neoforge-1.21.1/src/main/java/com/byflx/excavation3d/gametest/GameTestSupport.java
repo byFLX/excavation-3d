@@ -89,6 +89,12 @@ public final class GameTestSupport {
 
     private static void onExcavationFinished(ExcavationService.FinishedEvent event) {
         if (event.getPlayer() instanceof TestPlayer player) {
+            // Snapshot delivery before entities have a physics/pickup tick.
+            var box = new net.minecraft.world.phys.AABB(player.blockPosition()).inflate(5);
+            player.deliveredItems = player.serverLevel().getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class, box)
+                    .stream().map(item -> new DeliveredItem(item.getItem().copy(), item.position(), item.getDeltaMovement())).toList();
+            player.deliveredXp = player.serverLevel().getEntitiesOfClass(net.minecraft.world.entity.ExperienceOrb.class, box)
+                    .stream().map(orb -> new DeliveredXp(orb.value, orb.position())).toList();
             player.lastResult = event.getResult();
             player.resultCount++;
         }
@@ -136,8 +142,14 @@ public final class GameTestSupport {
         player.server.getPlayerList().remove(player);
     }
 
+    record DeliveredItem(net.minecraft.world.item.ItemStack stack, net.minecraft.world.phys.Vec3 position,
+            net.minecraft.world.phys.Vec3 motion) { }
+    record DeliveredXp(int value, net.minecraft.world.phys.Vec3 position) { }
+
     /** Keeps server-side results separately from messages so tests can assert silent completion. */
     static final class TestPlayer extends ServerPlayer {
+        java.util.List<DeliveredItem> deliveredItems = java.util.List.of();
+        java.util.List<DeliveredXp> deliveredXp = java.util.List.of();
         ExcavationService.Result lastResult;
         int resultCount;
         Component lastMessage;

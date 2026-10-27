@@ -43,6 +43,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockDropsEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
@@ -75,7 +76,7 @@ public final class ExcavationService {
     }
 
     public enum AbortReason {
-        TOOL_CHANGED, TOOL_BROKEN, PLAYER_GONE, DIED, DIMENSION_CHANGED
+        TOOL_CHANGED, TOOL_BROKEN, PLAYER_GONE, DIED, DIMENSION_CHANGED, SERVER_STOPPING
     }
 
     /** Immutable server-side snapshot; mined includes the confirmed start block. */
@@ -135,6 +136,8 @@ public final class ExcavationService {
         /** Starts at 1: an operation only exists once the start block was confirmed removed. */
         int mined = 1;
         boolean finished;
+        final DropDelivery drops;
+        BlockPos breaking;
 
         Operation(ServerPlayer player, Pending pending, List<BlockPos> targets) {
             this.player = player;
@@ -143,6 +146,7 @@ public final class ExcavationService {
             this.toolId = pending.toolId();
             this.startProgress = pending.startProgress();
             this.targets = targets;
+            this.drops = new DropDelivery(player, pending.level(), pending.pos());
         }
 
         int remaining() {
@@ -153,6 +157,8 @@ public final class ExcavationService {
     private static final Map<UUID, ClickedFace> LAST_FACE = new HashMap<>();
     private static final StartGate<Pending> STARTS = new StartGate<>();
     private static final Map<UUID, Operation> OPERATIONS = new LinkedHashMap<>();
+    // Confirmed starts own their drops before the end-of-tick gate decides whether to expand.
+    private static final Map<UUID, Operation> CONFIRMED = new LinkedHashMap<>();
     private static final Set<UUID> BREAKING_EXTRA = new HashSet<>();
     private static int rotation;
 
@@ -202,7 +208,7 @@ public final class ExcavationService {
             player.displayClientMessage(Component.translatable("message.excavation3d.creative_single_block"), true);
             return;
         }
-        if (OPERATIONS.containsKey(id)) {
+        if (OPERATIONS.containsKey(id) || CONFIRMED.containsKey(id)) {
             player.displayClientMessage(Component.translatable("message.excavation3d.busy"), true);
             return;
         }
@@ -228,9 +234,27 @@ public final class ExcavationService {
      * even if another mod cancelled the drops: the block is gone either way.
      */
     public static void onBlockDrops(BlockDropsEvent event) {
-        if (event.getBreaker() instanceof ServerPlayer player && !BREAKING_EXTRA.contains(player.getUUID())) {
-            STARTS.confirmRemoved(player.getUUID(), event.getPos());
+        if (!(event.getBreaker() instanceof ServerPlayer player)) return;
+        UUID id = player.getUUID();
+        Operation extra = OPERATIONS.get(id);
+        if (BREAKING_EXTRA.contains(id)) {
+            // Player, dimension and exact synchronous target must all match. Consume the scope once.
+            if (extra != null && extra.level == event.getLevel() && event.getPos().equals(extra.breaking)) {
+                extra.breaking = null;
+                extra.drops.capture(event);
+            }
+            return;
         }
+        Pending pending = STARTS.matching(id, event.getPos());
+        if (pending == null || pending.level() != event.getLevel() || CONFIRMED.containsKey(id)) return;
+        if (!STARTS.confirmRemoved(id, event.getPos())) return;
+        List<BlockPos> targets = new ArrayList<>(pending.offsets().size());
+        for (Offset offset : pending.offsets()) {
+            if (!offset.equals(Offset.ZERO)) targets.add(pending.pos().offset(offset.x(), offset.y(), offset.z()));
+        }
+        Operation operation = new Operation(player, pending, targets);
+        CONFIRMED.put(id, operation);
+        operation.drops.capture(event);
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
@@ -253,7 +277,8 @@ public final class ExcavationService {
 
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         UUID id = event.getEntity().getUUID();
-        OPERATIONS.remove(id);
+        abort(id, AbortReason.PLAYER_GONE);
+        DropPreferences.remove(id);
         STARTS.removePlayer(id);
         LAST_FACE.remove(id);
     }
@@ -268,8 +293,18 @@ public final class ExcavationService {
         }
     }
 
+    /** Before world/player saving, not ServerStopped (which is too late to persist entities). */
+    public static void onServerStopping(ServerStoppingEvent event) {
+        for (Operation operation : new ArrayList<>(OPERATIONS.values())) finish(operation, AbortReason.SERVER_STOPPING);
+        for (Operation operation : new ArrayList<>(CONFIRMED.values())) operation.drops.flush(true);
+        OPERATIONS.clear();
+        CONFIRMED.clear();
+    }
+
     public static void onServerStopped(ServerStoppedEvent event) {
         OPERATIONS.clear();
+        CONFIRMED.clear();
+        DropPreferences.clear();
         STARTS.clear();
         LAST_FACE.clear();
         BREAKING_EXTRA.clear();
@@ -279,23 +314,21 @@ public final class ExcavationService {
         // Unconfirmed attempts (cancelled event, refused removal, creative) are dropped here even if
         // someone else removed the block in the meantime, as are starts whose block came back.
         Map<UUID, Pending> started = STARTS.drain(
-                (pos, pending) -> blockRemoved(pending.level(), pending.pos(), pending.state()));
-        for (Map.Entry<UUID, Pending> entry : started.entrySet()) {
-            Pending pending = entry.getValue();
-            ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
-            if (player == null || OPERATIONS.containsKey(entry.getKey())) {
-                continue;
-            }
-            List<BlockPos> targets = new ArrayList<>(pending.offsets().size());
-            for (Offset offset : pending.offsets()) {
-                if (!offset.equals(Offset.ZERO)) {
-                    targets.add(pending.pos().offset(offset.x(), offset.y(), offset.z()));
-                }
-            }
-            if (!targets.isEmpty()) {
-                OPERATIONS.put(entry.getKey(), new Operation(player, pending, targets));
+                (pos, pending) -> pending.level().isLoaded(pos) && blockRemoved(pending.level(), pos, pending.state()));
+        for (UUID id : started.keySet()) {
+            Operation operation = CONFIRMED.remove(id);
+            if (operation == null) continue;
+            if (server.getPlayerList().getPlayer(id) == null || OPERATIONS.containsKey(id)) {
+                operation.drops.flush(true);
+            } else if (operation.targets.isEmpty()) {
+                operation.drops.flush(false);
+            } else {
+                OPERATIONS.put(id, operation);
             }
         }
+        // Late bypass, restored start block, or discarded attempt: its captured start still exists.
+        for (Operation operation : CONFIRMED.values()) operation.drops.flush(false);
+        CONFIRMED.clear();
     }
 
     /**
@@ -310,6 +343,7 @@ public final class ExcavationService {
     }
 
     private static void process(Operation operation, int budget) {
+        operation.drops.rememberPosition();
         for (int i = 0; i < budget && operation.remaining() > 0; i++) {
             AbortReason abort = validate(operation);
             if (abort != null) {
@@ -325,10 +359,12 @@ public final class ExcavationService {
             UUID id = operation.player.getUUID();
             BlockState before = operation.level.getBlockState(pos);
             boolean destroyed;
+            operation.breaking = pos;
             BREAKING_EXTRA.add(id);
             try {
                 destroyed = operation.player.gameMode.destroyBlock(pos);
             } finally {
+                operation.breaking = null;
                 BREAKING_EXTRA.remove(id);
             }
             // destroyBlock also returns true when the block refused its removal: check the world.
@@ -409,6 +445,8 @@ public final class ExcavationService {
 
     private static void abort(UUID id, AbortReason reason) {
         STARTS.forget(id);
+        Operation confirmed = CONFIRMED.remove(id);
+        if (confirmed != null) confirmed.drops.flush(true);
         Operation operation = OPERATIONS.remove(id);
         if (operation != null) {
             finish(operation, reason);
@@ -420,6 +458,8 @@ public final class ExcavationService {
             return;
         }
         operation.finished = true;
+        operation.drops.flush(abort == AbortReason.PLAYER_GONE || abort == AbortReason.DIED
+                || abort == AbortReason.DIMENSION_CHANGED || abort == AbortReason.SERVER_STOPPING);
         Result result = new Result(operation.mined, operation.skipped, abort);
         NeoForge.EVENT_BUS.post(new FinishedEvent(operation.player, result));
         // Normal completion is quiet, including skipped blocks. Only interruptions need feedback.

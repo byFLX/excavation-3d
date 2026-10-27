@@ -1,6 +1,7 @@
 package com.byflx.excavation3d.client.screen;
 
 import com.byflx.excavation3d.client.ClientState;
+import com.byflx.excavation3d.client.DropModeChoice;
 import com.byflx.excavation3d.client.PresetRepository;
 import com.byflx.excavation3d.data.ToolShapeData;
 import com.byflx.excavation3d.editor.CustomMaskDraft;
@@ -141,6 +142,7 @@ public final class ShapeEditorScreen extends Screen {
     private Button resetViewButton;
     private Button layerMenuButton;
     private Button applyButton;
+    private Button dropModeButton;
     private Button undoButton;
     private Button redoButton;
     private Button anchorButton;
@@ -481,6 +483,21 @@ public final class ShapeEditorScreen extends Screen {
         int w = Mth.clamp(width / 4, 60, 100);
         applyButton = addRenderableWidget(Button.builder(Component.translatable("gui.done"),
                 b -> apply()).bounds(width - MARGIN - w, actionY, w, 20).build());
+        dropModeButton = addRenderableWidget(Button.builder(DropModeChoice.label(), b -> {
+            DropModeChoice.cycle();
+            refreshDropMode();
+        }).bounds(leftX, actionY, Math.min(142, applyButton.getX() - leftX - 8), 20).build());
+        refreshDropMode();
+    }
+
+    private void refreshDropMode() {
+        Component label = DropModeChoice.label();
+        boolean active = !DropModeChoice.forced();
+        if (dropModeButton.getTooltip() != null && dropModeButton.active == active
+                && dropModeButton.getMessage().equals(label)) return;
+        dropModeButton.setMessage(label);
+        dropModeButton.active = active;
+        dropModeButton.setTooltip(Tooltip.create(DropModeChoice.tooltip()));
     }
 
     private <T extends AbstractWidget> T scrolled(T widget, int baseY) {
@@ -896,6 +913,7 @@ public final class ShapeEditorScreen extends Screen {
     public void tick() {
         super.tick();
         endStalePointer();
+        refreshDropMode();
         // Only runs while this screen is shown; behind the discard dialog the wait pauses.
         int retry = handshake.tick();
         if (retry != 0) {
@@ -1556,8 +1574,8 @@ public final class ShapeEditorScreen extends Screen {
     private void renderSummary(GuiGraphics graphics, int mouseX, int mouseY) {
         Component escapeHint = Component.translatable("gui.excavation3d.escape_hint");
         String fittedHint = com.byflx.excavation3d.editor.QuickMenuLogic.fitText(escapeHint.getString(),
-                applyButton.getX() - leftX - 8, font::width);
-        graphics.drawString(font, fittedHint, leftX, actionY + 6, MUTED);
+                applyButton.getX() - dropModeButton.getRight() - 12, font::width);
+        graphics.drawString(font, fittedHint, dropModeButton.getRight() + 6, actionY + 6, MUTED);
         Component problem = applyProblem();
         Component message = problem != null ? problem : status;
         int color = currentProblem() != null

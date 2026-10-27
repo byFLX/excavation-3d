@@ -1,6 +1,7 @@
 package com.byflx.excavation3d.client;
 
 import com.byflx.excavation3d.client.screen.ShapeEditorScreen;
+import com.byflx.excavation3d.excavation.DropPolicy;
 import com.byflx.excavation3d.shape.ShapeLimits;
 import com.byflx.excavation3d.shape.ShapeConfig;
 import com.byflx.excavation3d.data.ToolShapeData;
@@ -9,6 +10,9 @@ import net.minecraft.network.chat.Component;
 
 /** Client-only state: the server's limits, the open editor and the single-block key. Client thread only. */
 public final class ClientState {
+    private static DropPolicy dropPolicy = DropPolicy.PLAYER_CHOICE;
+    public static DropPolicy dropPolicy() { return dropPolicy; }
+    public static void setDropPolicy(DropPolicy policy) { dropPolicy = policy; }
     private static ShapeLimits limits = ShapeLimits.DEFAULT;
     private static ShapeEditorScreen editor;
     private static boolean bypassActive;
@@ -61,6 +65,7 @@ public final class ClientState {
 
     static void reset() {
         limits = ShapeLimits.DEFAULT;
+        dropPolicy = DropPolicy.PLAYER_CHOICE;
         editor = null;
         bypassActive = false;
         QuickShapeAction.reset();

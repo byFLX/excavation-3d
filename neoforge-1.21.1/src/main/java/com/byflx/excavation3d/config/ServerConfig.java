@@ -1,6 +1,7 @@
 package com.byflx.excavation3d.config;
 
 import com.byflx.excavation3d.shape.ShapeLimits;
+import com.byflx.excavation3d.excavation.DropPolicy;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
@@ -9,6 +10,7 @@ import net.neoforged.neoforge.common.ModConfigSpec;
  */
 public final class ServerConfig {
     public static final ModConfigSpec SPEC;
+    private static final ModConfigSpec.EnumValue<DropPolicy> FORCE_MODE;
     private static final ModConfigSpec.IntValue MAX_AXIS;
     private static final ModConfigSpec.IntValue MAX_SELECTED;
     private static final ModConfigSpec.IntValue PLAYER_BUDGET;
@@ -31,10 +33,18 @@ public final class ServerConfig {
         GLOBAL_BUDGET = builder.comment("Positions checked per tick across all players.")
                 .defineInRange("globalPerTick", DEFAULT_GLOBAL_BUDGET, 1, 65536);
         builder.pop();
+        builder.push("drops");
+        FORCE_MODE = builder.comment("Drop delivery for new excavations. PLAYER_CHOICE respects the client preference. No restart needed.")
+                .defineEnum("forceMode", DropPolicy.PLAYER_CHOICE);
+        builder.pop();
         SPEC = builder.build();
     }
 
     private ServerConfig() {
+    }
+
+    public static DropPolicy dropPolicy() {
+        return SPEC.isLoaded() ? FORCE_MODE.get() : DropPolicy.PLAYER_CHOICE;
     }
 
     public static ShapeLimits limits() {
