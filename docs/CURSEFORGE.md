@@ -81,7 +81,11 @@ floor or staircase with one swing. No new item, no recipe.
 - **Favorites:** save, load, edit and delete your own shapes.
 - **Quick wheel** (hold **V**): switch shape or turn it off instantly.
 - **World preview:** an outline shows exactly what the next swing mines.
-- **Bundled drops:** straight into your inventory, as one pile at the start block, or vanilla - your choice.
+- **Bundled drops** - your choice, in the editor (tap **V**, bottom left) or with an optional key:
+  - **Inventory** (default): everything goes straight into your inventory as full stacks; what does not fit
+    drops as one pile at your feet. XP comes as one orb.
+  - **Pile at start**: everything drops as one pile where you started mining.
+  - **Vanilla**: drops stay where each block was, like normal mining.
 - **Fair mining:** only blocks the tool is meant for; Fortune, Silk Touch, durability and protection work as
   normal. Hold **Shift** for a single block.
 - **Custom key bindings:** every key can be changed under Controls → Excavation 3D, plus optional keys for
