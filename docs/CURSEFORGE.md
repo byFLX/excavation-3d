@@ -1,4 +1,4 @@
-# CurseForge upload - Excavation 3D 1.0.0
+# CurseForge upload - Excavation 3D
 
 Everything needed for the upload. The operator does the upload (MOD_STANDARDS §10).
 
@@ -22,8 +22,8 @@ wall.
 
 | Field | Value |
 |---|---|
-| File | `neoforge-1.21.1/build/libs/excavation3d-neoforge-1.21.1-1.0.0.jar` |
-| Display name | Excavation 3D 1.0.0 (NeoForge 1.21.1) |
+| File | `neoforge-1.21.1/build/libs/excavation3d-neoforge-1.21.1-1.1.0.jar` |
+| Display name | Excavation 3D 1.1.0 (NeoForge 1.21.1) |
 | Release type | Release |
 | Game version | 1.21.1 |
 | Mod loader | NeoForge |
@@ -64,6 +64,8 @@ block pattern - and set it up in game with a 3D preview and a quick wheel. No ne
   and Reset. Click blocks in the preview to add or remove them, or build any pattern layer by layer.
 - **Quick wheel:** hold the editor key, pick a favorite or switch the shape off - without opening a screen.
 - **World preview:** an outline shows exactly which blocks the next swing will mine.
+- **Bundled drops:** the drops of a shape go straight into your inventory or land as one pile at the start block -
+  your choice in the editor (or vanilla scattering).
 - **Fair:** a shape only mines blocks the tool is meant for (a pickaxe digs stone, not wood). Drops, durability,
   enchantments and block protection work like normal mining. Big shapes are spread over several ticks.
 
