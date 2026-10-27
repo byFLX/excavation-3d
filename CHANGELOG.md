@@ -3,7 +3,7 @@
 All notable changes to Excavation 3D. The format follows [Keep a Changelog](https://keepachangelog.com/), versions
 follow [Semantic Versioning](https://semver.org/).
 
-## [1.1.0] - unreleased
+## [1.1.0] - 2026-10-27
 
 ### Added
 
