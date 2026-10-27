@@ -84,6 +84,8 @@ floor or staircase with one swing. No new item, no recipe.
 - **Bundled drops:** straight into your inventory, as one pile at the start block, or vanilla - your choice.
 - **Fair mining:** only blocks the tool is meant for; Fortune, Silk Touch, durability and protection work as
   normal. Hold **Shift** for a single block.
+- **Custom key bindings:** every key can be changed under Controls → Excavation 3D, plus optional keys for
+  toggle shape, next/previous favorite, favorite 1-5, world preview and drop mode.
 - **Server-friendly:** size limits and per-tick budgets in the server config; drop mode can be forced.
 
 ## Requirements
