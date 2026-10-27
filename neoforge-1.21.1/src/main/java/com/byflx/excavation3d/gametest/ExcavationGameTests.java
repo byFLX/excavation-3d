@@ -3,6 +3,8 @@ package com.byflx.excavation3d.gametest;
 import com.byflx.excavation3d.Excavation3D;
 import com.byflx.excavation3d.data.ToolShapeData;
 import com.byflx.excavation3d.excavation.ExcavationService;
+import com.byflx.excavation3d.excavation.DropMode;
+import com.byflx.excavation3d.excavation.DropPreferences;
 import com.byflx.excavation3d.excavation.ExcavationService.Result;
 import com.byflx.excavation3d.excavation.ExcavationService.SkipReason;
 import com.byflx.excavation3d.gametest.GameTestSupport.TestPlayer;
@@ -17,6 +19,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.inventory.AnvilMenu;
@@ -29,6 +32,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
@@ -463,7 +467,330 @@ public final class ExcavationGameTests {
         finish(helper, player);
     }
 
-    /** The 5 × 5 × 2 wall around the start block: x 2..6, y 1..5, z 3..4. */
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void defaultInventoryBundlesAllNineIncludingStart(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.remove(player.getUUID()); // No preference packet: default INVENTORY.
+        player.getInventory().setItem(1, new ItemStack(Items.DIRT, 60));
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            expectInventory(helper, player, Items.DIRT, 69);
+            if (player.getInventory().getItem(1).getCount() != 64 || player.getInventory().getItem(2).getCount() != 5)
+                helper.fail("Expected existing stack filled to 64 and remainder of 5");
+            expectItems(helper, Items.DIRT, 0);
+            expectResult(helper, player, 9, Map.of());
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void startPileBundlesAtExactCentreWithoutMotion(GameTestHelper helper) {
+        TestPlayer player = bundledScene(helper, DropMode.START_PILE);
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            expectInventory(helper, player, Items.DIRT, 0);
+            expectDelivery(helper, player, 9, Vec3.atCenterOf(helper.absolutePos(START)));
+            expectItems(helper, Items.DIRT, 9);
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void vanillaStillDropsAcrossTheMinedWall(GameTestHelper helper) {
+        TestPlayer player = bundledScene(helper, DropMode.VANILLA);
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            expectInventory(helper, player, Items.DIRT, 0);
+            expectItems(helper, Items.DIRT, 9);
+            long columns = player.deliveredItems.stream().map(item -> (int) Math.floor(item.position().x())).distinct().count();
+            if (columns < 3) helper.fail("Vanilla drops no longer span the mined wall");
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void fullInventoryOverflowsInOneStackAtFeet(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        for (int slot = 1; slot < 36; slot++) player.getInventory().setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            expectDelivery(helper, player, 9, player.position());
+            expectInventory(helper, player, Items.DIRT, 0);
+            expectItems(helper, Items.DIRT, 9);
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void brokenToolFlushesEverythingCollected(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        player.getMainHandItem().setDamageValue(player.getMainHandItem().getMaxDamage() - 2);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            if (player.lastResult == null || player.lastResult.abortReason() != ExcavationService.AbortReason.TOOL_BROKEN)
+                helper.fail("Expected tool-broken interruption");
+            expectInventory(helper, player, Items.DIRT, 2);
+            expectItems(helper, Items.DIRT, 0);
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void lateBypassDoesNotLoseCapturedStart(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        ExcavationService.setBypass(player, true);
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            expectInventory(helper, player, Items.DIRT, 1);
+            if (player.lastResult != null) helper.fail("Late bypass should prevent expansion");
+            helper.assertBlockPresent(Blocks.DIRT, START.east());
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void logoutBeforeFirstTickFlushesCapturedStart(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        GameTestSupport.remove(player);
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            expectItems(helper, Items.DIRT, 1);
+            helper.assertBlockPresent(Blocks.DIRT, START.east());
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void logoutMidOperationFlushesExactlyTheMinedPrefix(GameTestHelper helper) {
+        List<BlockPos> selection = BlockPos.betweenClosedStream(START.offset(-3, -3, 0), START.offset(3, 3, 0))
+                .map(BlockPos::immutable).toList();
+        selection.forEach(pos -> helper.setBlock(pos, Blocks.DIRT));
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, new ShapeParams.Cuboid(7, 7, 1));
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        helper.runAfterDelay(1, () -> {
+            int removed = (int) selection.stream().filter(pos -> helper.getBlockState(pos).isAir()).count();
+            if (removed <= 1 || removed >= 49 || player.lastResult != null)
+                helper.fail("Expected a partially mined multi-tick excavation");
+            GameTestSupport.remove(player);
+            helper.runAfterDelay(SETTLE_TICKS, () -> {
+                expectItems(helper, Items.DIRT, removed);
+                int nowRemoved = (int) selection.stream().filter(pos -> helper.getBlockState(pos).isAir()).count();
+                if (nowRemoved != removed) helper.fail("Excavation continued after logout");
+                helper.succeed();
+            });
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void dimensionChangeFlushesIntoOriginalWorld(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        var destination = helper.getLevel().getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+        if (destination == null) { helper.fail("Missing Nether test dimension"); return; }
+        player.teleportTo(destination, 0.5, 100, 0.5, 0, 0);
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            expectInventory(helper, player, Items.DIRT, 0);
+            expectItems(helper, Items.DIRT, 1);
+            helper.assertBlockPresent(Blocks.DIRT, START.east());
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void deathFlushesCapturedStartBeforeInventoryIsDropped(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        player.hurt(helper.getLevel().damageSources().genericKill(), Float.MAX_VALUE);
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            expectItems(helper, Items.DIRT, 1);
+            helper.assertBlockPresent(Blocks.DIRT, START.east());
+            finish(helper, player);
+        });
+    }
+
+    // This handler clears global operation state, so exercise it in an isolated batch.
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE, batch = "drops_stopping")
+    public static void serverStoppingFlushesBeforeSave(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        ExcavationService.onServerStopping(new net.neoforged.neoforge.event.server.ServerStoppingEvent(helper.getLevel().getServer()));
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            expectItems(helper, Items.DIRT, 1);
+            helper.assertBlockPresent(Blocks.DIRT, START.east());
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void capturesOnlyTheSynchronousTargetAndBreaker(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        TestPlayer other = GameTestSupport.spawnSurvivalPlayer(helper);
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        BlockPos unrelated = helper.absolutePos(START.offset(3, 0, 0));
+        boolean[] checked = {false};
+        java.util.function.Consumer<net.neoforged.neoforge.event.level.BlockDropsEvent> listener = event -> {
+            if (checked[0] || event.getBreaker() != player || event.getPos().equals(helper.absolutePos(START))) return;
+            checked[0] = true;
+            // Nested unrelated drop events while the extra destroyBlock scope is active.
+            for (ServerPlayer breaker : List.of(player, other)) {
+                BlockPos pos = breaker == player ? unrelated : event.getPos();
+                var drops = new java.util.ArrayList<ItemEntity>();
+                drops.add(new ItemEntity(helper.getLevel(), pos.getX(), pos.getY(), pos.getZ(), new ItemStack(Items.DIAMOND)));
+                var nested = new net.neoforged.neoforge.event.level.BlockDropsEvent(helper.getLevel(), pos,
+                        Blocks.DIRT.defaultBlockState(), null, drops, breaker, ItemStack.EMPTY);
+                net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(nested);
+                if (nested.isCanceled() || nested.getDrops().size() != 1)
+                    helper.fail("Captured another player's or unrelated block's drops");
+            }
+        };
+        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.HIGH, listener);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            net.neoforged.neoforge.common.NeoForge.EVENT_BUS.unregister(listener);
+            if (!checked[0]) helper.fail("No extra block drop event observed");
+            expectInventory(helper, player, Items.DIRT, 9);
+            expectInventory(helper, player, Items.DIAMOND, 0);
+            GameTestSupport.remove(other);
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void lootComponentsRemainSeparateAndCancelledDropsStayEmpty(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        BlockPos cancelled = helper.absolutePos(START.east());
+        java.util.function.Consumer<net.neoforged.neoforge.event.level.BlockDropsEvent> listener = event -> {
+            if (event.getBreaker() != player) return;
+            if (event.getPos().equals(cancelled)) { event.setCanceled(true); return; }
+            ItemStack named = new ItemStack(Items.DIRT);
+            named.set(DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.translatable("block.minecraft.stone"));
+            event.getDrops().add(new ItemEntity(helper.getLevel(), 0, 0, 0, named));
+        };
+        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.HIGH, listener);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            net.neoforged.neoforge.common.NeoForge.EVENT_BUS.unregister(listener);
+            var stacks = player.getInventory().items.stream().filter(stack -> stack.is(Items.DIRT)).toList();
+            if (stacks.size() != 2 || stacks.stream().anyMatch(stack -> stack.getCount() != 8)
+                    || stacks.stream().filter(stack -> stack.has(DataComponents.CUSTOM_NAME)).count() != 1)
+                helper.fail("Expected separate normal/named loot stacks of 8: " + stacks);
+            expectItems(helper, Items.DIRT, 0);
+            expectDamage(helper, player, 9);
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void inventoryProtectionStillDropsNothingForDeniedBlock(GameTestHelper helper) {
+        buildWall(helper, Blocks.DIRT);
+        BlockPos guarded = helper.absolutePos(START.east());
+        GameTestSupport.protect(guarded);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.set(player.getUUID(), DropMode.INVENTORY);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            GameTestSupport.unprotect(guarded);
+            expectInventory(helper, player, Items.DIRT, 8);
+            expectItems(helper, Items.DIRT, 0);
+            helper.assertBlockPresent(Blocks.DIRT, START.east());
+            expectResult(helper, player, 8, Map.of(SkipReason.PROTECTED, 1));
+            finish(helper, player);
+        });
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void experienceIsOneOrbAtStart(GameTestHelper helper) {
+        xpScene(helper, DropMode.START_PILE, true);
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void inventoryExperienceIsOneOrbAtPlayer(GameTestHelper helper) {
+        xpScene(helper, DropMode.INVENTORY, true);
+    }
+
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE)
+    public static void excessiveModdedExperienceIsSplitWithoutLoss(GameTestHelper helper) {
+        xpScene(helper, DropMode.START_PILE, true, 40000);
+    }
+
+    // Separate batch: this test temporarily changes a world-wide rule.
+    @GameTest(template = GameTestSupport.EMPTY_TEMPLATE, batch = "drops_rule")
+    public static void disabledBlockDropsDoNotCreateBundledExperience(GameTestHelper helper) {
+        xpScene(helper, DropMode.START_PILE, false);
+    }
+
+    private static void xpScene(GameTestHelper helper, DropMode mode, boolean dropsEnabled) {
+        xpScene(helper, mode, dropsEnabled, 3);
+    }
+
+    private static void xpScene(GameTestHelper helper, DropMode mode, boolean dropsEnabled, int xpPerBlock) {
+        buildWall(helper, Blocks.COAL_ORE);
+        TestPlayer player = playerWithTool(helper, Items.IRON_PICKAXE, SQUARE);
+        DropPreferences.set(player.getUUID(), mode);
+        java.util.function.Consumer<net.neoforged.neoforge.event.level.BlockDropsEvent> listener = event -> {
+            if (event.getBreaker() == player) event.setDroppedExperience(xpPerBlock);
+        };
+        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.HIGH, listener);
+        var rule = helper.getLevel().getGameRules().getRule(net.minecraft.world.level.GameRules.RULE_DOBLOCKDROPS);
+        boolean previous = rule.get();
+        if (!dropsEnabled) rule.set(false, helper.getLevel().getServer());
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            if (!dropsEnabled) rule.set(previous, helper.getLevel().getServer());
+            net.neoforged.neoforge.common.NeoForge.EVENT_BUS.unregister(listener);
+            Vec3 expected = mode == DropMode.INVENTORY ? player.position() : Vec3.atCenterOf(helper.absolutePos(START));
+            if (dropsEnabled) {
+                int total = player.deliveredXp.stream().mapToInt(GameTestSupport.DeliveredXp::value).sum();
+                if (total != 9 * xpPerBlock || player.deliveredXp.stream().anyMatch(orb -> orb.value() > 32767))
+                    helper.fail("Bundled experience was lost or exceeded the orb safety limit: " + player.deliveredXp);
+                if (xpPerBlock == 3 && (player.deliveredXp.size() != 1
+                        || player.deliveredXp.getFirst().position().distanceToSqr(expected) > 0.000001))
+                    helper.fail("Expected one orb containing all 27 XP at delivery position: " + player.deliveredXp);
+            }
+            if (!dropsEnabled && !player.deliveredXp.isEmpty()) helper.fail("doTileDrops=false produced experience");
+            finish(helper, player);
+        });
+    }
+
+    private static TestPlayer bundledScene(GameTestHelper helper, DropMode mode) {
+        buildWall(helper, Blocks.DIRT);
+        TestPlayer player = playerWithTool(helper, Items.IRON_SHOVEL, SQUARE);
+        DropPreferences.set(player.getUUID(), mode);
+        player.gameMode.destroyBlock(helper.absolutePos(START));
+        return player;
+    }
+
+    private static void expectInventory(GameTestHelper helper, TestPlayer player, Item item, int expected) {
+        int count = player.getInventory().items.stream().filter(stack -> stack.is(item)).mapToInt(ItemStack::getCount).sum();
+        if (count != expected) helper.fail("Expected inventory count " + expected + ", got " + count);
+    }
+
+    private static void expectDelivery(GameTestHelper helper, TestPlayer player, int count, Vec3 expected) {
+        var drops = player.deliveredItems.stream().filter(item -> item.stack().is(Items.DIRT)).toList();
+        if (drops.size() != 1 || drops.getFirst().stack().getCount() != count
+                || drops.getFirst().position().distanceToSqr(expected) > 0.000001
+                || drops.getFirst().motion().lengthSqr() > 0.000001)
+            helper.fail("Expected a single motionless stack at " + expected + ", got " + drops);
+    }
+
+    /** The 5 by 5 by 2 wall around the start: x 2..6, y 1..5, z 3..4. */
     private static List<BlockPos> wall() {
         return BlockPos.betweenClosedStream(new BlockPos(2, 1, 3), new BlockPos(6, 5, 4))
                 .map(BlockPos::immutable)
@@ -495,6 +822,8 @@ public final class ExcavationGameTests {
     private static TestPlayer playerWithTool(GameTestHelper helper, Item item, ShapeParams params) {
         TestPlayer player = GameTestSupport.spawnSurvivalPlayer(helper);
         place(helper, player);
+        // Existing regression cases retain their original world-drop expectations.
+        DropPreferences.set(player.getUUID(), DropMode.VANILLA);
         player.setItemInHand(InteractionHand.MAIN_HAND, shapedTool(helper, item, params));
         return player;
     }

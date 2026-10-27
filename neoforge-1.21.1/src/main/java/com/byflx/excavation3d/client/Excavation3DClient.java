@@ -36,7 +36,7 @@ public final class Excavation3DClient {
     private static final String CATEGORY = "key.categories.excavation3d";
     private static KeyMapping openEditor;
     private static KeyMapping singleBlock;
-    private static KeyMapping toggleShape, nextPreset, previousPreset, toggleWorldPreview;
+    private static KeyMapping toggleShape, nextPreset, previousPreset, toggleWorldPreview, cycleDropMode;
     private static final KeyMapping[] presetSlots = new KeyMapping[5];
     private static boolean sentBypass;
     private static final QuickMenuLogic.Hold editorHold = new QuickMenuLogic.Hold();
@@ -49,6 +49,7 @@ public final class Excavation3DClient {
         NeoForge.EVENT_BUS.addListener(Excavation3DClient::onClientTick);
         NeoForge.EVENT_BUS.addListener(Excavation3DClient::onInteractionKey);
         NeoForge.EVENT_BUS.addListener(Excavation3DClient::onLoggingOut);
+        NeoForge.EVENT_BUS.addListener(Excavation3DClient::onLoggingIn);
         NeoForge.EVENT_BUS.addListener(WorldPreview::onRenderLevel);
         NeoForge.EVENT_BUS.addListener(ToolHud::onRenderGui);
         NeoForge.EVENT_BUS.addListener(QuickShapeScreen::onRenderGuiLayer);
@@ -78,6 +79,7 @@ public final class Excavation3DClient {
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_LEFT_SHIFT, CATEGORY);
         event.register(openEditor);
         event.register(singleBlock);
+        cycleDropMode = registerUnbound(event, "cycle_drop_mode");
         toggleShape = registerUnbound(event, "toggle_shape");
         nextPreset = registerUnbound(event, "next_preset");
         previousPreset = registerUnbound(event, "previous_preset");
@@ -148,6 +150,10 @@ public final class Excavation3DClient {
                 }
             }
         }
+        boolean cycleDrops = false;
+        if (cycleDropMode != null) while (cycleDropMode.consumeClick()) cycleDrops = true;
+        if (cycleDrops && minecraft.player != null && minecraft.screen == null) DropModeChoice.cycle();
+        DropModeChoice.sync();
         shortcuts(minecraft);
         QuickShapeAction.tick();
         syncBypass(minecraft);
@@ -213,8 +219,13 @@ public final class Excavation3DClient {
         return openEditor == null ? Component.literal("V") : openEditor.getTranslatedKeyMessage();
     }
 
+    private static void onLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
+        DropModeChoice.reset();
+    }
+
     private static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         sentBypass = false;
+        DropModeChoice.reset();
         editorHold.cancel();
         suppressEditor = false;
         ClientState.reset();

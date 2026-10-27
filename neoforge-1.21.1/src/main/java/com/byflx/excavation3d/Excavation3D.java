@@ -24,6 +24,7 @@ public final class Excavation3D {
 
         IEventBus gameBus = NeoForge.EVENT_BUS;
         gameBus.addListener(ModNetwork::onLogin);
+        gameBus.addListener(ModNetwork::onServerTick);
         gameBus.addListener(ModNetwork::onLogout);
         gameBus.addListener(ModNetwork::onServerStopped);
         // Lowest priority: protection mods decide first; cancelled breaks are not delivered here.
@@ -35,6 +36,7 @@ public final class Excavation3D {
         gameBus.addListener(ExcavationService::onLogout);
         gameBus.addListener(ExcavationService::onChangedDimension);
         gameBus.addListener(ExcavationService::onDeath);
+        gameBus.addListener(ExcavationService::onServerStopping);
         gameBus.addListener(ExcavationService::onServerStopped);
     }
 }

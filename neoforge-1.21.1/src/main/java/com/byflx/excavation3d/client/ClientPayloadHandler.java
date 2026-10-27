@@ -7,6 +7,10 @@ import com.byflx.excavation3d.net.LimitsPayload;
 
 /** Client side of the editor protocol. Called on the client main thread (enqueued by {@code ModNetwork}). */
 public final class ClientPayloadHandler {
+    public static void onDropPolicy(com.byflx.excavation3d.net.DropPolicyPayload payload) {
+        ClientState.setDropPolicy(payload.policy());
+    }
+
     private ClientPayloadHandler() {
     }
 

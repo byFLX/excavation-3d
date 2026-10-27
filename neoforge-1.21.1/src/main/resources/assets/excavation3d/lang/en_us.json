@@ -209,5 +209,16 @@
   "gui.excavation3d.size.decrease": "Decrease %s by 1 (hold Shift for 5).",
   "gui.excavation3d.size.increase": "Increase %s by 1 (hold Shift for 5).",
   "gui.excavation3d.layer.previous": "Previous layer",
-  "gui.excavation3d.layer.next": "Next layer"
+  "gui.excavation3d.layer.next": "Next layer",
+  "drops.excavation3d.inventory": "Inventory",
+  "drops.excavation3d.start_pile": "Pile at start",
+  "drops.excavation3d.vanilla": "Vanilla",
+  "gui.excavation3d.drops": "Drops: %s",
+  "gui.excavation3d.drops.tooltip": "Inventory: fill your inventory; overflow at your feet. Pile at start: merged stacks at the start block. Vanilla: drops at each mined block. Saved immediately, independently of the shape.",
+  "gui.excavation3d.drops.forced": "Set by the server",
+  "key.excavation3d.cycle_drop_mode": "Cycle drop mode",
+  "abort.excavation3d.server_stopping": "server stopping",
+  "excavation3d.configuration.drops": "Drop delivery",
+  "excavation3d.configuration.forceMode": "Forced drop mode",
+  "excavation3d.configuration.dropMode": "Preferred drop mode"
 }

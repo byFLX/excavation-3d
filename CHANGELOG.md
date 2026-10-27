@@ -3,6 +3,22 @@
 All notable changes to Excavation 3D. The format follows [Keep a Changelog](https://keepachangelog.com/), versions
 follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-10-27
+
+### Added
+
+- Bundled excavation drops, including the start block: Inventory (default), Pile at start, or Vanilla.
+  Inventory overflow drops as merged stacks at your feet; bundled XP is a single pickup orb.
+- Immediate drop-mode selection in the editor and an optional unbound Cycle drop mode key.
+- Per-player client preference and server `drops.forceMode` override, displayed in the editor.
+- Flush on completion/interruption, bounded item buffering, and safe original-dimension delivery on logout,
+  death, dimension change and server stop.
+
+### Compatibility
+
+- Network protocol bumped from 5 to 6. Client and server must both use **1.1.0**.
+- Saved shape format remains version 1; existing tools and favorites remain readable.
+
 ## [1.0.0] - 2026-10-25
 
 First public release.

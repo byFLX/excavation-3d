@@ -87,6 +87,12 @@ public final class StartGate<P> {
         return true;
     }
 
+    /** Returns only the payload at this exact attempted position. */
+    public P matching(UUID player, BlockPos pos) {
+        Attempt<P> attempt = attempts.get(player);
+        return attempt != null && attempt.pos.equals(pos) ? attempt.payload : null;
+    }
+
     public boolean has(UUID player) {
         return attempts.containsKey(player);
     }

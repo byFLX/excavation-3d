@@ -33,7 +33,7 @@ Detailed behaviour of every control, kept for development and reviews. The playe
 
 ## Data and network
 
-- Custom orientation is persisted as optional `player_horizontal` (absent/false keeps existing hit-face behavior). Both world preview and server excavation use the stored mode; geometric limits and server hit-face validation are unchanged. The network registrar version is now **5** for the added wire flag; clients and servers must use matching versions. The persisted shape format remains version 1.
+- Custom orientation is persisted as optional `player_horizontal` (absent/false keeps existing hit-face behavior). Both world preview and server excavation use the stored mode; geometric limits and server hit-face validation are unchanged. The network registrar version is now **6** for drop preference/policy payloads (version 5 introduced the orientation wire flag); clients and servers must use matching versions. The persisted shape format remains version 1.
 
 ## Code layout (`com.byflx.excavation3d`)
 
@@ -49,3 +49,40 @@ Detailed behaviour of every control, kept for development and reviews. The playe
 | `gametest` | Game Tests for excavation in the world; only active on the Game Test server | server |
 
 The scaffold uses the same ModDevGradle, NeoForge and JUnit versions as the byFLX Create Stock Instant Craft mod, so the Agent-Team's offline Gradle sandbox can build it from its existing dependency seed.
+
+## Bundled drops (1.1.0)
+
+- `dropMode` in `config/excavation3d-client.toml` is `INVENTORY` (default), `START_PILE`, or `VANILLA`.
+  The editor's bottom-left Drops button cycles it immediately, independently of Done, draft dirty state and
+  undo history. Escape discards only shape changes. The optional unbound Cycle drop mode control also saves
+  immediately and shows the mode in the tool hint. External client config edits sync on the next client tick.
+- Client-to-server `drop_mode` is exactly one unsigned enum byte (0..2). Unknown ordinals are rejected during
+  decoding. It is sent after joining the play connection and whenever the preference changes. The server keeps
+  session choices by UUID and defaults to INVENTORY without a packet. Disconnect clears the session choice.
+- Server `drops.forceMode` is `PLAYER_CHOICE` (default), `INVENTORY`, `START_PILE`, or `VANILLA`.
+  A one-byte server-to-client `drop_policy` updates on login and config reload; forced mode is greyed out with
+  "Set by the server". No restart is needed. Each excavation snapshots its effective mode at confirmed start;
+  changes during an operation apply to the next operation. The client's saved choice survives overrides.
+- Only matching player, original dimension and exact current target are captured, once per synchronous
+  `destroyBlock` call. The confirmed start break is also captured. Denied breaks create no drops; cancelled
+  drop events are respected. Fortune, Silk Touch, global loot modifiers, XP enchantment adjustments, tool wear
+  and normal non-XP `spawnAfterBreak` effects retain the existing mining path. `doTileDrops` still governs XP.
+- Captured stacks merge only with `ItemStack.isSameItemSameComponents`, respecting each item's stack limit.
+  INVENTORY fills existing inventory stacks, then empty slots; overflow is packed again and spawned at the
+  player's feet. START_PILE spawns at the start block's exact centre. Items spawn with zero velocity and a normal
+  pickup delay; gravity and later vanilla entity movement still apply. VANILLA captures nothing.
+- XP is one orb at the same delivery location, preserving vanilla pickup events and Mending instead of adding
+  XP directly. An orb carries the full accumulated value up to **32,767 XP**; larger modded rewards trigger an
+  early flush and split into orbs up to this limit to keep vanilla Mending integer arithmetic safe. Vanilla mode retains vanilla XP splitting and positions.
+- Normally delivery happens once at completion or interruption. Memory is capped at **256 legal item stacks**
+  per operation: before another stack would exceed the cap, those items are delivered early. This bounds
+  retained loot even for mods producing many component variants or huge drop counts, without discarding loot.
+  XP stays accumulated until final flush (or the 32,767 XP safety threshold). This is capacity-based, with no
+  periodic per-tick scan. Tool changes/breakage deliver what has already been collected.
+- Logout, death, dimension change and server stopping flush into the original dimension at the start if loaded,
+  otherwise at the last recorded player position in that dimension. If that fallback chunk also unloaded, one
+  chunk is synchronously loaded before spawning so entities can be tracked and saved. ServerStopping runs before
+  player/world saves; ServerStopped only clears state. A late bypass, a restored start block, or a discarded
+  pending expansion still flushes the already captured start drops. Creative and ordinary single-block mining
+  remain vanilla.
+- Saved shape format stays **1**; the registrar protocol is **6**, requiring matching 1.1.0 client and server.
